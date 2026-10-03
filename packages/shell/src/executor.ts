@@ -104,7 +104,7 @@ export async function submitEdit(
     if (req.op !== null && (req.route === "no-llm" || !deps.generateDiff)) {
       // Tier-1 deterministic path (sub-2s). No model, no network.
       try {
-        nextText = applyTier1Edit(original, req.op);
+        nextText = applyTier1Edit(original, req.op, req.target);
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
         nextText = null;
@@ -124,7 +124,7 @@ export async function submitEdit(
         // Generator unusable: fall back to Tier-1 hint when one exists.
         if (req.op !== null) {
           try {
-            nextText = applyTier1Edit(original, req.op);
+            nextText = applyTier1Edit(original, req.op, req.target);
           } catch (err) {
             lastError = err instanceof Error ? err.message : String(err);
             nextText = null;

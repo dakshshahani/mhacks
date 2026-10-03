@@ -34,28 +34,92 @@ const port = Number(process.env.PORT ?? 5173);
 
 const git = new FileGitService(demoRoot);
 const preview = new PreviewHost();
-// Canned probe — Dev A seam: replace setProbe arg with the WebGazer
-// queryElementAt when it lands. Shape stays GazeFrame either way.
+// Harness stub probe — Dev A seam: replace with the WebGazer queryElementAt
+// when it lands. Shape stays GazeFrame either way. Emulates a real prober:
+// one candidate per template block element in DOM order (never shuffled),
+// each with its data-source line, plus lockedTarget = deepest element under
+// the point (mirrors elementsFromPoint hit-testing). Geometry is approximate
+// stub data, good enough for click-to-override until the tracker supplies it.
 preview.setProbe(
-  (x, y) =>
-    Promise.resolve({
-      candidates: [
-        {
-          id: "c0",
-          selector: "div.hero",
-          componentName: "Hero",
-          filePath: "Hero.tsx",
-          boundingRect: { x, y, width: 200, height: 120 },
-          outerHTMLSnippet: '<div class="hero">Hello demo</div>',
-          htmlTruncated: false,
-          confidence: 0.9,
-          trackedConfidence: 0.95,
-          supportedOps: [{ op: "set-color", param: "brand" }],
-        },
-      ],
-      lockedTarget: null,
+  (x, y) => {
+    const candidates = [
+      {
+        id: "c0",
+        selector: "div.hero",
+        componentName: "Hero",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 24, y: 24, width: 600, height: 200 },
+        outerHTMLSnippet: '<div class="hero">…</div>',
+        htmlTruncated: true,
+        confidence: 0.9,
+        trackedConfidence: 0.95,
+        supportedOps: [{ op: "set-color", param: "brand" }],
+        sourceLine: 1,
+      },
+      {
+        id: "c1",
+        selector: "h1",
+        componentName: "HeroTitle",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 40, y: 40, width: 300, height: 40 },
+        outerHTMLSnippet: "<h1>Hello demo</h1>",
+        htmlTruncated: false,
+        confidence: 0.85,
+        trackedConfidence: 0.9,
+        supportedOps: [
+          { op: "set-color", param: "brand" },
+          { op: "swap-text", param: "Hello demo" },
+        ],
+        sourceLine: 2,
+      },
+      {
+        id: "c2",
+        selector: "p.sub",
+        componentName: "HeroSub",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 40, y: 90, width: 300, height: 24 },
+        outerHTMLSnippet: "<p>Look at me, then speak.</p>",
+        htmlTruncated: false,
+        confidence: 0.85,
+        trackedConfidence: 0.9,
+        supportedOps: [
+          { op: "set-color", param: "brand" },
+          { op: "swap-text", param: "Look at me, then speak." },
+        ],
+        sourceLine: 3,
+      },
+      {
+        id: "c3",
+        selector: "button",
+        componentName: "GoButton",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 40, y: 124, width: 80, height: 36 },
+        outerHTMLSnippet: "<button>Go</button>",
+        htmlTruncated: false,
+        confidence: 0.85,
+        trackedConfidence: 0.9,
+        supportedOps: [
+          { op: "set-color", param: "brand" },
+          { op: "set-radius", param: "full" },
+          { op: "swap-text", param: "Go" },
+        ],
+        sourceLine: 4,
+      },
+    ];
+    // Deepest containing candidate wins (DOM order = shallowest first).
+    let lockedTarget = null;
+    for (const c of candidates) {
+      const r = c.boundingRect;
+      if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
+        lockedTarget = c;
+      }
+    }
+    return Promise.resolve({
+      candidates,
+      lockedTarget,
       capturedAt: Date.now(),
-    }),
+    });
+  },
   true,
 );
 const speech = new SpeechService([{ kind: "web-speech", isAvailable: () => true }]);

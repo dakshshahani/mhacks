@@ -46,20 +46,23 @@ export function extractTextSpans(transcript: string): string[] {
   return spans;
 }
 
-/** Candidate id under the point (containment); null when gaze/click is on
- *  empty space. Contract §6.1: id only, never a name/label. */
+/** Candidate id under the point; deepest nested wins (mirrors
+ *  elementsFromPoint hit-testing — parents contain their children, so the
+ *  first DOM-order match would always be the outermost). Null on empty space.
+ *  Contract §6.1: id only, never a name/label. */
 export function findPointerOver(
   candidates: ElementCandidate[],
   x: number,
   y: number,
 ): string | null {
+  let hit: string | null = null;
   for (const c of candidates) {
     const r = c.boundingRect;
     if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
-      return c.id;
+      hit = c.id;
     }
   }
-  return null;
+  return hit;
 }
 
 /** Closed-catalog input for Jev: trimmed transcript + point + visible list in
@@ -90,9 +93,13 @@ export function buildDecisionInput(
   return input;
 }
 
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function mentionName(c: ElementCandidate): string[] {
   const names = [c.componentName ?? "", (c.filePath ?? "").replace(/\.[^.]+$/, "")];
-  return names.map((n) => n.toLowerCase()).filter((n) => n.length > 0);
+  return names.map(normName).filter((n) => n.length > 0);
 }
 
 /** Cross-element context (§5.4b) from live state only — never fabricated.
@@ -103,7 +110,7 @@ export function resolveContext(
   frame: GazeFrame,
   targetId: string,
 ): { parent?: ParentAddress; references?: ElementCandidate[] } {
-  const lowered = transcript.toLowerCase();
+  const lowered = normName(transcript);
   const refs = frame.candidates.filter((c) => {
     if (c.id === targetId) return false;
     return mentionName(c).some((n) => lowered.includes(n));
@@ -201,9 +208,14 @@ export async function decideAndEdit(
   pipeline.startListening();
 
   // Harness lock-on emulation: Dev A's client freezes lockedTarget on
-  // speech:start; the canned probe leaves it null, so freeze the top
-  // candidate here until the real gaze client supplies it.
-  const lockedTarget = frame.lockedTarget ?? frame.candidates[0] ?? null;
+  // speech:start; if the probe didn't supply one, freeze the deepest element
+  // under the point (same hit-test rule as findPointerOver).
+  const overId = findPointerOver(frame.candidates, x, y);
+  const lockedTarget =
+    frame.lockedTarget ??
+    frame.candidates.find((c) => c.id === overId) ??
+    frame.candidates[0] ??
+    null;
 
   const input = buildDecisionInput(text, x, y, frame, lockedTarget?.id ?? null);
   const decision = await services.decide.decide(input);

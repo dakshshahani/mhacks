@@ -40,7 +40,7 @@ export function buildEditPrompt(req: EditRequest, files: EditFileContext = {}): 
     `Intent: ${req.intent}`,
     `Transcript: ${req.transcript}`,
     `Component: ${t.componentName ?? "unknown"} File: ${t.filePath ?? "unknown"}`,
-    `Target element — apply the edit HERE, not to parents or siblings: selector=${t.selector} HTML=${t.outerHTMLSnippet}`,
+    `Target element — apply the edit HERE, not to parents or siblings: selector=${t.selector} HTML=${t.outerHTMLSnippet}${typeof t.sourceLine === "number" ? ` (source ${t.filePath ?? "file"} line ${t.sourceLine})` : ""}`,
   ];
   if (req.op !== null) lines.push(`Catalog op hint: ${JSON.stringify(req.op)}`);
   if (req.references && req.references.length > 0) {

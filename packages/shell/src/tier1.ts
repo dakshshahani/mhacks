@@ -3,7 +3,7 @@
 // Vocabulary owned by Dev B (EditOp union in agent.ts); this switch must stay
 // exhaustive with that union — adding an op means updating both together.
 
-import type { EditOp } from "@mhacks/contracts";
+import type { EditOp, ElementCandidate } from "@mhacks/contracts";
 import {
   COLOR_TOKENS,
   RADIUS_TOKENS,
@@ -71,22 +71,29 @@ function swapClassGroup(classList: string, next: string[], group: Set<string>): 
 }
 
 /**
- * Apply one Tier-1 op to file text. Operates on the first class/className
- * attribute found (template components each own one); appends when absent.
- * swap-text replaces the first inner-text run (>...<); hide adds `hidden`.
- * Pure string edit — no DOM, no model, no network.
+ * Apply one Tier-1 op to file text. Scoped to the target element's
+ * data-source line when known (multi-element files: the button's blue must
+ * not land on the hero div); falls back to the first class/className
+ * attribute when the target carries no line. swap-text replaces the inner
+ * text run in scope; hide adds `hidden`. Pure string edit — no DOM, no
+ * model, no network.
  */
-export function applyTier1Edit(fileText: string, op: EditOp): string {
+export function applyTier1Edit(
+  fileText: string,
+  op: EditOp,
+  target?: Pick<ElementCandidate, "sourceLine"> | null,
+): string {
+  const line = target?.sourceLine ?? null;
   switch (op.op) {
     case "set-color": {
       const next = COLOR_CLASS[op.param] ?? `bg-${op.param}`;
-      return upsertClass(fileText, (cls) =>
+      return upsertClass(fileText, line, (cls) =>
         swapClassToken(cls, next, new Set(Object.values(COLOR_CLASS))),
       );
     }
     case "set-radius": {
       const next = RADIUS_CLASS[op.param] ?? `rounded-${op.param}`;
-      return upsertClass(fileText, (cls) =>
+      return upsertClass(fileText, line, (cls) =>
         swapClassToken(
           cls,
           next,
@@ -96,39 +103,71 @@ export function applyTier1Edit(fileText: string, op: EditOp): string {
     }
     case "set-spacing": {
       const next = (SPACING_CLASS[op.param] ?? "").split(" ").filter(Boolean);
-      return upsertClass(fileText, (cls) => swapClassGroup(cls, next, SPACING_VALUES));
+      return upsertClass(fileText, line, (cls) => swapClassGroup(cls, next, SPACING_VALUES));
     }
     case "set-align": {
       const next = ALIGN_CLASS[op.param] ?? `text-${op.param}`;
-      return upsertClass(fileText, (cls) =>
+      return upsertClass(fileText, line, (cls) =>
         swapClassToken(cls, next, new Set(Object.values(ALIGN_CLASS))),
       );
     }
     case "hide": {
-      return upsertClass(fileText, (cls) => {
+      return upsertClass(fileText, line, (cls) => {
         if (/\bhidden\b/.test(cls)) return cls;
         return cls.length > 0 ? `${cls} hidden` : "hidden";
       });
     }
     case "swap-text": {
-      return fileText.replace(/>([^<>]{1,500})</, `>${escapeHtml(op.param)}<`);
+      return replaceText(fileText, line, `>${escapeHtml(op.param)}<`);
     }
   }
 }
 
-function upsertClass(fileText: string, fn: (cls: string) => string): string {
+/** Operate on one 1-based line when valid, else the whole text (legacy
+ *  single-element behavior). Out-of-range lines fall back the same way —
+ *  never a no-op throw on the sub-2s path. */
+function scopeToLine(fileText: string, line: number | null): { head: string; scope: string; tail: string } {
+  if (typeof line !== "number" || !Number.isInteger(line) || line < 1) {
+    return { head: "", scope: fileText, tail: "" };
+  }
+  const lines = fileText.split("\n");
+  if (line > lines.length) return { head: "", scope: fileText, tail: "" };
+  const idx = line - 1;
+  return {
+    head: lines.slice(0, idx).join("\n") + (idx > 0 ? "\n" : ""),
+    scope: lines[idx] as string,
+    tail: (idx + 1 < lines.length ? "\n" : "") + lines.slice(idx + 1).join("\n"),
+  };
+}
+
+function upsertClass(
+  fileText: string,
+  line: number | null,
+  fn: (cls: string) => string,
+): string {
+  const { head, scope, tail } = scopeToLine(fileText, line);
   const re = /(className|class)="([^"]*)"/;
-  const m = re.exec(fileText);
+  const m = re.exec(scope);
   if (!m) {
-    // No class attribute: attach to the first opening tag so the edit lands.
-    return fileText.replace(/<([a-zA-Z][\w-]*)/, (full, tag: string) => {
+    // No class attribute in scope: attach to the first opening tag there.
+    const next = scope.replace(/<([a-zA-Z][\w-]*)/, (full, tag: string) => {
       const added = fn("");
       return `<${String(tag)} className="${added}"`;
     });
+    return head + next + tail;
   }
   const current = m[2] ?? "";
   const next = fn(current);
-  return fileText.slice(0, m.index) + `${m[1]}="${next}"` + fileText.slice(m.index + m[0].length);
+  return head + scope.slice(0, m.index) + `${m[1]}="${next}"` + scope.slice(m.index + m[0].length) + tail;
+}
+
+function replaceText(fileText: string, line: number | null, replacement: string): string {
+  const { head, scope, tail } = scopeToLine(fileText, line);
+  // Single-line scope keeps multi-element files honest; the unscoped legacy
+  // shape spans newlines, so a scoped regex without the multiline flag can
+  // never leak onto a sibling element.
+  const next = scope.replace(/>([^<>]{1,500})</, replacement);
+  return head + next + tail;
 }
 
 function escapeHtml(s: string): string {

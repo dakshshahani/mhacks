@@ -42,6 +42,37 @@ describe("tier1 renderer", () => {
     assert.doesNotMatch(out, /Hello/);
   });
 
+  it("set-color scopes to the target source line, siblings untouched", () => {
+    const file = [
+      `<div className="hero bg-muted" data-source="Hero.tsx:1">`,
+      `  <h1 className="text-2xl" data-source="Hero.tsx:2">Hello</h1>`,
+      `  <button className="rounded-md bg-muted" data-source="Hero.tsx:4">Go</button>`,
+      `</div>`,
+    ].join("\n");
+    const out = applyTier1Edit(file, { op: "set-color", param: "brand" }, { sourceLine: 3 });
+    const lines = out.split("\n");
+    assert.match(lines[0] as string, /bg-muted/);
+    assert.match(lines[1] as string, /text-2xl/);
+    assert.match(lines[2] as string, /bg-brand/);
+    assert.doesNotMatch(lines[2] as string, /bg-muted/);
+  });
+
+  it("swap-text scopes to the target line only", () => {
+    const file = `<div>Hello</div>\n<p>Bye</p>`;
+    const out = applyTier1Edit(file, { op: "swap-text", param: "Hi" }, { sourceLine: 2 });
+    assert.match(out.split("\n")[0] as string, /Hello/);
+    assert.match(out.split("\n")[1] as string, /Hi/);
+  });
+
+  it("out-of-range or missing line falls back to first match", () => {
+    const file = `<div className="a">x</div>`;
+    assert.match(
+      applyTier1Edit(file, { op: "set-color", param: "brand" }, { sourceLine: 99 }),
+      /bg-brand/,
+    );
+    assert.match(applyTier1Edit(file, { op: "set-color", param: "brand" }), /bg-brand/);
+  });
+
   it("closure mirror: executable iff in catalog", () => {
     assert.equal(isTier1Executable("set-color", "brand"), true);
     assert.equal(isTier1Executable("set-color", "chartreuse"), false);
