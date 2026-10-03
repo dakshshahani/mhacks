@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "dev": "node --experimental-strip-types --import ../../packages/shell/dev-register.mjs ./src/dev-server.mjs"
+    "dev": "node --experimental-strip-types --import ../../packages/shell/dev-register.mjs --import ../../packages/orchestrator/dev-register.mjs ./src/dev-server.mjs"
   },
   "dependencies": {
     "@mhacks/contracts": "workspace:*",
+    "@mhacks/orchestrator": "workspace:*",
     "@mhacks/shell": "workspace:*"
   },
   "devDependencies": {

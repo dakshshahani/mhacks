@@ -13,6 +13,9 @@ importers:
       '@mhacks/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@mhacks/orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/orchestrator
       '@mhacks/shell':
         specifier: workspace:*
         version: link:../../packages/shell

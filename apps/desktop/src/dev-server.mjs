@@ -1,11 +1,12 @@
 // Thin static server for the browser harness (G1-G2).
 // REAL: HTTP, FileGitService, executor, Tier-1, PreviewHost, SpeechService,
-// all running in Node against apps/desktop/demo.
+// Jev DecisionLayer (+mockJev fallback), composeEditRequest, PipelineMachine,
+// Flash-Lite diff generator, all running in Node against apps/desktop/demo.
 // STUBBED (boundary, injectable): gaze probe (canned GazeFrame), recognizers
-// (in-memory), diff generator (Tier-1 only), build gate (pass-through).
-// Dev B's orchestrator (real Jev + Flash-Lite, or mockJev/mockAgent) talks to
-// the same IpcRouter via POST /api/invoke — swap the canned frame for
-// Decision -> composeEditRequest output at G2/G3 with no shell changes.
+// (in-memory), build gate (pass-through). The /api/run endpoint drives the
+// full look→speak→decide→edit path: probe -> DecisionInput -> Jev ->
+// composeEditRequest -> agent:submitEdit. Swap the canned probe for Dev A's
+// real prober and set TYPESAFE_API_KEY/GEMINI_API_KEY with no shell changes.
 
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -15,6 +16,14 @@ import { FileGitService } from "../../../packages/shell/src/git.ts";
 import { PreviewHost } from "../../../packages/shell/src/preview.ts";
 import { SpeechService } from "../../../packages/shell/src/speech.ts";
 import { IpcRouter } from "../../../packages/shell/src/ipcRouter.ts";
+import { POLICY } from "../../../packages/contracts/src/decision.ts";
+import {
+  createJevLayer,
+  composeEditRequest,
+  generateNarrowDiff,
+  PipelineMachine,
+} from "../../../packages/orchestrator/src/index.ts";
+
 import {
   COLOR_CLASS,
   RADIUS_CLASS,
@@ -52,6 +61,11 @@ preview.setProbe(
   true,
 );
 const speech = new SpeechService([{ kind: "web-speech", isAvailable: () => true }]);
+// Dev B's decision + generation layers. No API keys -> deterministic
+// fallbacks (mockJev + Tier-1), so the full path works offline; with keys
+// (TYPESAFE_API_KEY, GEMINI_API_KEY) the same path uses real Jev + Flash-Lite.
+const jev = createJevLayer();
+const pipe = new PipelineMachine();
 const router = new IpcRouter({
   git,
   preview,
@@ -63,8 +77,75 @@ const router = new IpcRouter({
       await wf(p, t, "utf8");
     },
     resolveRoot: (f) => (f ? join(demoRoot, f) : demoRoot),
+    // Small/large routes: Flash-Lite narrow diff with executor retry context
+    // (parentSection + error-fed lastError). Null without a key -> the
+    // executor falls back to the Tier-1 op hint when one exists.
+    generateDiff: (req, ctx) => generateNarrowDiff(req, { context: ctx }),
   },
 });
+
+/** Quoted spans ("...") become Jev textSpans for swap-text (span0..span4). */
+function extractSpans(transcript) {
+  const out = [];
+  const re = /"([^"]+)"|'([^']+)'/g;
+  let m;
+  while ((m = re.exec(transcript)) !== null && out.length < 5) {
+    out.push((m[1] ?? m[2] ?? "").trim());
+  }
+  return out.filter((s) => s.length > 0);
+}
+
+/**
+ * Full pipeline: gaze point + transcript -> Jev decision -> composed
+ * EditRequest -> executor. Drives Dev B's PipelineMachine; every exit
+ * returns the machine snapshot so the UI renders from it, never from
+ * ad-hoc status strings.
+ */
+async function runPipeline({ x, y, transcript }) {
+  pipe.startListening();
+  const probed = await preview.queryElementAt(x, y);
+  if (!probed.ok) {
+    pipe.fail(`gaze: ${probed.message ?? probed.code}`);
+    return { status: "failed", pipeline: pipe.getState() };
+  }
+  const frame = probed.value;
+  const top = frame.candidates[0];
+  if (!top) {
+    pipe.fail("gaze: no candidates at point");
+    return { status: "failed", pipeline: pipe.getState() };
+  }
+  pipe.lock(top.componentName ?? top.id);
+  const decision = await jev.decide({
+    transcript: transcript ?? "",
+    pointer: { x, y },
+    pointerOver: top.id,
+    components: frame.candidates,
+    textSpans: extractSpans(transcript ?? ""),
+  });
+  if (decision.actionable < POLICY.ACTIONABLE_MIN || decision.target === null) {
+    pipe.fail("dropped: background chatter");
+    return { status: "dropped", decision, pipeline: pipe.getState() };
+  }
+  const edit = composeEditRequest({ transcript: transcript ?? "", decision, frame });
+  if (!edit) {
+    pipe.fail("dropped: target left the frame");
+    return { status: "dropped", decision, pipeline: pipe.getState() };
+  }
+  pipe.startEditing(edit.id, `Editing ${edit.target.filePath ?? edit.target.id}…`);
+  const res = await router.invoke("agent:submitEdit", edit);
+  if (!res.ok) {
+    pipe.fail(res.message ?? res.code);
+    return { status: "failed", decision, edit: { op: edit.op, route: edit.route }, pipeline: pipe.getState() };
+  }
+  pipe.apply();
+  return {
+    status: "applied",
+    decision,
+    edit: { op: edit.op, route: edit.route },
+    result: res.value,
+    pipeline: pipe.getState(),
+  };
+}
 
 const MIME = {
   ".html": "text/html",
@@ -126,6 +207,20 @@ async function renderPreview() {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
+  if (req.method === "POST" && url.pathname === "/api/run") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const { x, y, transcript } = JSON.parse(body);
+      const out = await runPipeline({ x, y, transcript });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(out));
+    } catch (err) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "failed", message: String(err) }));
+    }
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/api/invoke") {
     let body = "";
     for await (const chunk of req) body += chunk;

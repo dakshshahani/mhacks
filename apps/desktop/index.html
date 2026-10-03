@@ -20,6 +20,8 @@
     <button id="toggle" type="button">toggle speech</button>
     <span id="status" data-testid="status-line">idle</span>
     <button id="demo-edit" type="button">demo edit: hero → brand</button>
+    <input id="cmd" type="text" placeholder='say what to change, e.g. "make it brand"' size="40" />
+    <button id="run" type="button">run pipeline (click preview → type → run)</button>
   </div>
   <!-- Browser harness preview (G1-G2). Electron <webview> replaces this later. -->
   <iframe id="preview" title="preview" src="/demo/preview.html"></iframe>

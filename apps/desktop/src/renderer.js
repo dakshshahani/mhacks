@@ -107,9 +107,35 @@ undoEl?.addEventListener("click", async () => {
 });
 
 // Click fallback inside the iframe bubbles here via postMessage.
+// The last clicked point arms the gaze point for the next pipeline run
+// (stand-in for Dev A's gaze lock until the eye tracker lands).
+let lastPoint = { x: 10, y: 10 };
 window.addEventListener("message", (e) => {
   if (e.data && e.data.type === "preview-click") {
+    lastPoint = { x: e.data.x, y: e.data.y };
     setStatus(`Clicked preview at ${e.data.x},${e.data.y} (override armed)`);
+  }
+});
+
+// Full pipeline: gaze point + transcript -> Jev -> compose -> executor.
+// Exercises the same server path the voice+tracker loop will use.
+document.querySelector("#run")?.addEventListener("click", async () => {
+  const transcript = document.querySelector("#cmd")?.value ?? "";
+  setStatus("Deciding…");
+  const r = await fetch("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...lastPoint, transcript }),
+  }).then((res) => res.json());
+  if (r.status === "applied") {
+    const op = r.edit.op ? `${r.edit.op.op} → ${r.edit.op.param}` : "custom edit";
+    setStatus(`Done: ${op} via ${r.edit.route} (${r.result.filesChanged.join(", ")} @ ${r.result.commitSha.slice(0, 8)}) — undo within 5s to revert`);
+    showUndoCircle(5000);
+    document.querySelector("#preview")?.contentWindow?.location.reload();
+  } else if (r.status === "dropped") {
+    setStatus(`Dropped: ${r.pipeline.error ?? "not actionable"} (intent=${r.decision?.intent ?? "?"})`);
+  } else {
+    setStatus(`Failed: ${r.pipeline?.error ?? r.message ?? "unknown"}`);
   }
 });
 

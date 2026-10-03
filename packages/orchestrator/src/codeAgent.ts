@@ -11,7 +11,9 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const TIMEOUT_MS = 30000;
 const MAX_OUTPUT_TOKENS = 2048;
 
-export function buildEditPrompt(req: EditRequest): string {
+export function buildEditPrompt(req: EditRequest): string;
+export function buildEditPrompt(req: EditRequest, ctx: DiffContext): string;
+export function buildEditPrompt(req: EditRequest, ctx?: DiffContext): string {
   const t = req.target;
   const lines = [
     "You are a code-editing micro-model. Output ONLY a unified diff. No prose.",
@@ -29,6 +31,15 @@ export function buildEditPrompt(req: EditRequest): string {
       );
     }
   }
+  if (ctx?.parentSection) {
+    lines.push(`Enclosing file context:\n${ctx.parentSection.slice(0, 2000)}`);
+  }
+  if (ctx && ctx.attempt > 0 && ctx.lastError) {
+    lines.push(
+      `Previous attempt ${ctx.attempt} failed the build gate: ${ctx.lastError}. ` +
+        "Fix the error and output ONLY the corrected unified diff.",
+    );
+  }
   return lines.join("\n");
 }
 
@@ -40,6 +51,16 @@ export interface FlashLiteOptions {
   apiKey?: string;
   modelId?: string;
   logger?: { warn(...args: unknown[]): void };
+  /** Executor retry context (parentSection/attempt/lastError) — appended to
+   *  the prompt so build-gate retries are error-fed per the grill lock. */
+  context?: DiffContext;
+}
+
+/** Retry context shape mirrors ExecutorDeps.generateDiff's second arg. */
+export interface DiffContext {
+  parentSection: string | null;
+  attempt: number;
+  lastError: string | null;
 }
 
 /** Returns the unified diff text, or null when unusable (caller treats as build-fail). */
@@ -53,6 +74,8 @@ export async function generateNarrowDiff(
     return null;
   }
   const modelId = options.modelId ?? CODE_MODEL.id;
+  const context = options.context;
+  const prompt = context ? buildEditPrompt(req, context) : buildEditPrompt(req);
   try {
     const res = await fetch(
       `${ENDPOINT}/${modelId}:generateContent?key=${apiKey}`,
@@ -65,7 +88,7 @@ export async function generateNarrowDiff(
               maxOutputTokens: MAX_OUTPUT_TOKENS,
             },
           contents: [
-            { role: "user", parts: [{ text: buildEditPrompt(req) }] },
+            { role: "user", parts: [{ text: prompt }] },
           ],
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
