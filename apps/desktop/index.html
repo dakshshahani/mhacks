@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mhacks desktop harness</title>
+  <style>
+    body { margin: 0; background: #0b0e14; color: #e6e9f0; font-family: system-ui, sans-serif; }
+    #bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; }
+    #mic { border: 1px solid #333; border-radius: 999px; padding: 4px 10px; }
+    #preview { width: 100%; height: calc(100vh - 120px); border: 0; background: white; }
+    #undo { position: fixed; right: 24px; bottom: 24px; width: 72px; height: 72px;
+      border-radius: 50%; border: 2px solid #7dd3fc; display: none;
+      align-items: center; justify-content: center; background: rgba(125,211,252,.12); }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <span id="mic" data-testid="mic-chip">mic off · elevenlabs-trial</span>
+    <button id="toggle" type="button">toggle speech</button>
+    <span id="status" data-testid="status-line">idle</span>
+    <button id="demo-edit" type="button">demo edit: hero → brand</button>
+  </div>
+  <!-- Browser harness preview (G1-G2). Electron <webview> replaces this later. -->
+  <iframe id="preview" title="preview" src="/demo/preview.html"></iframe>
+  <!-- Undo circle: 5s window, ~500ms gaze dwell or click reverts (PM renders). -->
+  <div id="undo" data-testid="undo-circle">undo</div>
+  <script type="module" src="./src/renderer.js"></script>
+</body>
+</html>

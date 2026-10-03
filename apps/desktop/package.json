@@ -1,0 +1,17 @@
+{
+  "name": "@mhacks/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "dev": "node --experimental-strip-types --import ../../packages/shell/dev-register.mjs ./src/dev-server.mjs"
+  },
+  "dependencies": {
+    "@mhacks/contracts": "workspace:*",
+    "@mhacks/shell": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
