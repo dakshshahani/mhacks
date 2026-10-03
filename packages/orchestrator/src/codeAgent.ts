@@ -31,6 +31,8 @@ export function buildEditPrompt(req: EditRequest, files: EditFileContext = {}): 
   const lines = [
     "You are a code-editing micro-model. Output ONLY the complete updated file content. No prose, no explanations, no diff markers, no code fences.",
     "Rules: reproduce the current file below with exactly the requested edit applied. Preserve every data-source=\"...\" attribute byte-for-byte — never remove or renumber them. Change nothing else: no reformatting, no new imports, no extra elements.",
+    "Styling vocabulary: reuse ONLY class names already present in the file, plus the catalog bg-brand / bg-muted / bg-accent. Never invent other class names (undefined classes render as invisible). For any color outside the catalog, use an inline style instead, e.g. style={{ backgroundColor: 'brown' }}.",
+    "Text edits: replace the target text in place. Never add, remove, or duplicate text nodes or elements.",
     `Intent: ${req.intent}`,
     `Transcript: ${req.transcript}`,
     `Component: ${t.componentName ?? "unknown"} File: ${t.filePath ?? "unknown"}`,

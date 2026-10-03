@@ -125,8 +125,10 @@ export async function sendEdit(transcript) {
   }
   lastApplied = body;
   const secs = Math.round(body.undoWindowMs / 1000);
+  const flag =
+    body.editRequest.route !== "no-llm" && !body.verified ? " (unverified — check it)" : "";
   setStatus(
-    `Done: ${describeOp(body.editRequest)} (${body.editResult.filesChanged.join(", ")} @ ${body.editResult.commitSha.slice(0, 8)}) — undo within ${secs}s to revert`,
+    `Done: ${describeOp(body.editRequest)} (${body.editResult.filesChanged.join(", ")} @ ${body.editResult.commitSha.slice(0, 8)}) — undo within ${secs}s to revert${flag}`,
   );
   showUndoCircle(body.undoWindowMs);
   previewEl?.contentWindow?.location.reload();

@@ -163,6 +163,7 @@ export async function submitEdit(
         durationMs,
         hotReloaded: hot === true,
       };
+      if (nextText.length > 0) value.diffExcerpt = nextText.slice(0, 800);
       return { ok: true, value };
     }
 

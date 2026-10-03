@@ -92,13 +92,44 @@ export class FileGitService {
     return snap;
   }
 
-  /** Revert tree to the state before the last snapshot. No-op message when empty. */
+  /** Revert one applied edit. Undo markers stay in history for the timeline
+   *  but are skipped when finding the next target, so consecutive undos walk
+   *  back through real edits instead of oscillating (redoing) the last one.
+   *  History stays append-only; empty (or all-undone) history throws and the
+   *  router maps that to a not-ready envelope. */
   async undo(): Promise<{ snap: Snapshot; restored: boolean }> {
     const list = await this.history();
-    const last = list[list.length - 1];
-    if (!last) throw new Error("nothing to undo");
-    const prev = list[list.length - 2];
-    const srcDir = prev ? path.join(this.storeDir, prev.sha) : null;
+    const isMarker = (label: string): boolean => label.startsWith("undo ");
+    const undone = new Set<string>();
+    for (const s of list) {
+      const m = /^undo (\S+)/.exec(s.label);
+      if (m?.[1]) undone.add(m[1]);
+    }
+    // Last real edit that hasn't already been undone. Baselines (pre-edit)
+    // are never targets themselves — they are what we restore.
+    let idx = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i];
+      if (!s) continue;
+      if (isMarker(s.label) || s.label.startsWith("pre-edit ") || undone.has(s.sha)) continue;
+      idx = i;
+      break;
+    }
+    if (idx < 0) throw new Error("nothing to undo");
+    const target = list[idx] as Snapshot;
+    // Baseline = nearest preceding entry with a snapshot dir (the paired
+    // pre-edit in executor flow; skips markers, which have no dir).
+    let base: Snapshot | null = null;
+    for (let i = idx - 1; i >= 0; i--) {
+      const cand = list[i];
+      if (!cand || isMarker(cand.label)) continue;
+      if (await exists(path.join(this.storeDir, cand.sha))) {
+        base = cand;
+        break;
+      }
+    }
+    if (!base) throw new Error("nothing to undo");
+    const srcDir = path.join(this.storeDir, base.sha);
     // Clear tracked files (keep the store itself).
     const files: string[] = [];
     if (await exists(this.root)) await walkFiles(this.root, files, this.root);
@@ -116,7 +147,7 @@ export class FileGitService {
         await fs.copyFile(s, d);
       }
     }
-    const restored: Snapshot = { sha: makeSha(), label: `undo ${last.sha}`, at: Date.now() };
+    const restored: Snapshot = { sha: makeSha(), label: `undo ${target.sha}`, at: Date.now() };
     // Record the undo as a new history entry so timeline shows it.
     const next = [...list, restored];
     await this.saveHistory(next);

@@ -149,7 +149,8 @@ function diffSummaryFor(req: EditRequest, result: EditResult): string {
   return (
     `intent=${req.intent} ` +
     `op=${req.op === null ? "custom" : JSON.stringify(req.op)} ` +
-    `files=${result.filesChanged.join(",")}`
+    `files=${result.filesChanged.join(",")} ` +
+    `newText=${(result.diffExcerpt ?? "").slice(0, 800)}`
   );
 }
 
@@ -219,48 +220,16 @@ export async function decideAndEdit(
     return { kind: "error", message: submit.message };
   }
 
-  // Verify is skipped on no-llm (build + Undo covers it); one Jev noul pass
-  // with a single retry on small/large.
+  // Verify is skipped on no-llm (build + Undo covers it). On small/large a
+  // single advisory Jev noul pass runs — advisory because a re-submit with an
+  // identical prompt rarely improves anything yet costs a second stacked edit
+  // (which breaks one-send-one-undo). Low verify therefore flags the result
+  // instead of retrying: the build gate passed and Undo covers it.
   pipeline.startVerifying();
   let verified = false;
   if (req.route !== "no-llm" && services.verify) {
     const first = await services.verify(text, diffSummaryFor(req, submit.value));
-    if (first.matches >= POLICY.RETRY_THRESHOLD) {
-      verified = true;
-    } else {
-      const retry = await services.submitEdit(req);
-      if (!retry.ok) {
-        // The first apply above is real and committed — report it (unverified)
-        // rather than an error that claims nothing applied. Fail-open: the
-        // build gate passed and Undo covers it.
-        pipeline.apply();
-        speech.resetToIdle();
-        return {
-          kind: "applied",
-          decision,
-          editRequest: req,
-          editResult: submit.value,
-          undoWindowMs: undoWindowMs(decision.riskScore),
-          verified: false,
-        };
-      }
-      const second = await services.verify(text, diffSummaryFor(req, retry.value));
-      verified = second.matches >= POLICY.RETRY_THRESHOLD;
-      if (verified) {
-        pipeline.apply();
-        speech.resetToIdle();
-        return {
-          kind: "applied",
-          decision,
-          editRequest: req,
-          editResult: retry.value,
-          undoWindowMs: undoWindowMs(decision.riskScore),
-          verified,
-        };
-      }
-      // Verify-low after the single retry still applies: the build gate
-      // passed and Undo covers it — fail-open, never stall the demo.
-    }
+    verified = first.matches >= POLICY.RETRY_THRESHOLD;
   }
 
   pipeline.apply();

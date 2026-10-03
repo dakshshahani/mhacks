@@ -68,6 +68,9 @@ export interface EditResult {
   commitSha: string; // Dev C always pre-commits, so Undo always exists
   durationMs: number;
   hotReloaded: boolean; // did HMR pick it up
+  /** First ~800 chars of the new target file text (harness verify input).
+   *  Lets the verify pass see WHAT changed, not just that files changed. */
+  diffExcerpt?: string;
 }
 
 /** Dev B's seam: real agent and mock both implement this. */

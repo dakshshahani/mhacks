@@ -245,7 +245,11 @@ async function handleDecideAndEdit(body, res) {
     },
   });
   switch (outcome.kind) {
-    case "applied":
+    case "applied": {
+      const d = outcome.decision;
+      console.log(
+        `[pipeline] applied route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)}`,
+      );
       sendJson(res, 200, {
         ok: true,
         decision: outcome.decision,
@@ -255,6 +259,7 @@ async function handleDecideAndEdit(body, res) {
         verified: outcome.verified,
       });
       return;
+    }
     case "dropped":
       sendJson(res, 200, { ok: true, dropped: true, decision: outcome.decision });
       return;

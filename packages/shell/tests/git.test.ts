@@ -36,6 +36,24 @@ describe("FileGitService", () => {
     }
   });
 
+  it("consecutive undos walk back through edits instead of oscillating", async () => {
+    const root = await makeRoot();
+    const git = new FileGitService(root);
+    await git.createSnapshot("pre-edit e-1");
+    await fs.writeFile(path.join(root, "Hero.tsx"), `<div className="hero">One</div>`);
+    await git.createSnapshot("edit e-1");
+    await git.createSnapshot("pre-edit e-2");
+    await fs.writeFile(path.join(root, "Hero.tsx"), `<div className="hero">Two</div>`);
+    await git.createSnapshot("edit e-2");
+
+    await git.undo();
+    assert.match(await fs.readFile(path.join(root, "Hero.tsx"), "utf8"), /One/);
+    await git.undo();
+    assert.match(await fs.readFile(path.join(root, "Hero.tsx"), "utf8"), /Hello/);
+    // Third undo: everything already undone.
+    await assert.rejects(() => git.undo(), /nothing to undo/);
+  });
+
   it("confirm resolves a known sha, rejects unknown", async () => {
     const root = await makeRoot();
     const git = new FileGitService(root);
