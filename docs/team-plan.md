@@ -82,7 +82,7 @@ the `queryElementAt(x, y) => Promise<GazeFrame>` contract.
 ## Dev C — Shell & side effects (the real world)
 
 **Works with:** Electron/React shell, `<webview>`/BrowserView, `git` plumbing,
-processes, ElevenLabs/Web Speech mic lifecycle, `safeStorage`.
+processes, all speech plumbing (STT P0 + P2 TTS), tier-1 patch renderer.
 
 **What they own (in integration order):**
 1. App shell + embedded preview running a managed dev server (F1).
@@ -97,11 +97,17 @@ processes, ElevenLabs/Web Speech mic lifecycle, `safeStorage`.
    `EditResult` (real `commitSha`, real `hotReloaded`).
 5. Dev-server manager: spawn/restart/HMR detection (source of
    `hotReloaded` truth).
-6. Speech plumbing: mic stream lifecycle behind `speech:*` channels;
-   ElevenLabs (sponsor) primary, Web Speech fallback — both hidden behind
-   the same events. Estimated time: 1h.
-7. BYOK via `safeStorage` (P1, only after G3).
-8. Electron wrap — LAST, only after G3 passes. If not done by the demo,
+6. Speech plumbing — ALL speech work is Dev C's, behind the same `speech:*`
+   channels: **STT** (command capture: Web Speech primary, ElevenLabs Scribe
+   fallback) is P0; **TTS** (agent narration, F14) is P2 — deterministic
+   template sentence from `EditResult`, drop-cut is an `<audio>` element,
+   must be tested by G4 or it doesn't ship. Estimated: 1h for STT path.
+7. **Tier-1 patch renderer (final split):** `EditOp` union → deterministic
+   className/string edits. Reassigned from Dev B (grill pass) — pure code,
+   no model access, executor-side (Dev C). ~2h. The sub-2s path lives here.
+8. ~~BYOK~~ — display-only (billing mocked; locked). PM owns the key field
+   UI; Dev C adds a ~20-line `safeStorage` wrapper after G3 only if time.
+9. Electron wrap — LAST, only after G3 passes. If not done by the demo,
    the React/browser harness ships (locked decision).
 
 **Specific deliverables:**

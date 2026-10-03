@@ -164,7 +164,7 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 | Eye-tracking library tested on a team laptop | Core feature feasibility | Dev A | Hour 2 |
 | Design tokens / `design.md` | All UI work | PM/Designer | Hour 3 |
 | Starter React + Tailwind template repo | Safe demo target | Dev B | Hour 4 |
-| Stripe test account | Tiers | Dev C | Day 2 |
+| ~~Stripe test account~~ *(cut — tiers fully mocked in demo grill decision)* | ~~Tiers~~ | PM (mock UI) | n/a |
 | Vercel project | Backend + landing | Dev C | Day 2 |
 
 **Build-order dependencies:** F7 (design) and F1 (preview) → F2/F3 (gaze) → F4 (speech) → F5 (LLM agent) → F5b (Jev layer, can be stubbed with an LLM call until access arrives) → F6 (git). F9, F11, F12 are parallelizable.
@@ -173,10 +173,12 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 
 *(Grill decision: contract-first — all cross-team types/mocks live in `packages/contracts/`, frozen hour 3, changed only via PR to Dev B. Integration gates G1–G5 replace an end-of-hackathon merge. See `AGENTS.md` + `docs/grill-decisions.md`. Load ratio ≈ B 40 / C 25 / A 20 / PM 15.)*
 
-- **Dev A:** Eye tracking, calibration, gaze→element mapping, overlay (F2, F3, F8)
-- **Dev B:** Jev decision layer, code-editing agent, DOM→source mapping, edit pipeline (F5, F5b)
-- **Dev C:** Electron shell, git workflow, BYOK, Vercel/Stripe (F1, F6, F9, F11)
-- **PM/Designer/FE:** Design system, glass UI components, speech toggle, landing and pricing pages, demo script (F7, F4 UI, F12). Start with components that are mostly layout and styling, and pair with Dev C for Electron-specific pieces.
+- **Dev A:** Eye tracking, calibration, gaze→element mapping, `data-source` plugin, overlay input (F2, F3, F8)
+- **Dev B:** Contracts package, Jev decision layer, code-editing agent (Haiku), pipeline state machine, retry policy (F5, F5b)
+- **Dev C:** Shell + preview, IPC channels, git service, edit executor + **Tier-1 patch renderer**, speech plumbing — both STT (command capture, Web Speech primary / ElevenLabs Scribe fallback) and TTS (agent narration, P2, behind the same `speech:*` channels) (F1, F4, F5-exec side, F6)
+- **PM/Designer/FE:** Design system, glass UI components, undo circle, speech UI (mic chip w/ sponsor badge, transcript states), BYOK field, token meter, pricing cards (mocked), landing and pricing pages, demo script (F7, F11 UI, F12)
+
+**Unblocking rules (final split):** mocks (`mockAgent`/`mockJev`) built in contracts are sanctioned stubs owned by Dev C's envelope work and reviewed by Dev B; the Tier-1 patch renderer is executor-side (Dev C) since it is pure deterministic code against frozen catalogs; BYOK is a display-only field (billing is mocked) — PM owns the UI, Dev C a 20-line `safeStorage` wrapper sometime after G3; gate G3 is done as two small swaps (real agent ~h9, real Jev ~h11) instead of one three-way merge.
 
 ## **12. Timeline (24 hours — fixed by grill)**
 
