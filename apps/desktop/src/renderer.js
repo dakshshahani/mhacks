@@ -179,10 +179,98 @@ events.onmessage = (e) => {
 };
 
 document.querySelector("#toggle")?.addEventListener("click", async () => {
+  // Real toggle: listening -> stop everything; otherwise start the server
+  // stream first, then the browser recognizer when one exists.
+  if (webSpeechActive) {
+    stopWebSpeech();
+    await invoke("speech:stop", undefined);
+    return;
+  }
   const r = await invoke("speech:start", undefined);
-  if (!r.ok) setStatus(`mic: ${r.message ?? r.code}`);
+  if (!r.ok) {
+    setStatus(`mic: ${r.message ?? r.code}`);
+    return;
+  }
   // Listening state arrives over SSE; no optimistic chip update.
+  startWebSpeech();
 });
+
+// STT capture (dev-c.md 5.6: Web Speech primary). The server owns the mic
+// STATE machine; the browser owns the audio. Interim tokens fill the editable
+// box (misrecognition mitigation); a final token auto-sends through the
+// pipeline. No recognizer (e.g. Firefox) -> the box + send button IS the
+// recognizer, unchanged.
+let webSpeechActive = false;
+let webSpeechRec = null;
+
+function webSpeechCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+export function startWebSpeech() {
+  const Ctor = webSpeechCtor();
+  if (!Ctor) {
+    setStatus("Listening… (type in the box, then send — no browser recognizer)");
+    return;
+  }
+  try {
+    const rec = new Ctor();
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e) => {
+      let interim = "";
+      let finalText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        const text = res[0]?.transcript ?? "";
+        if (res.isFinal) finalText += text;
+        else interim += text;
+      }
+      const showing = (finalText || interim).trim();
+      if (transcriptEl && showing) transcriptEl.value = showing;
+      if (finalText.trim()) {
+        fetch("/api/transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: finalText.trim(), isFinal: true }),
+        }).catch(() => undefined);
+        stopWebSpeech();
+        sendEdit(finalText.trim());
+      } else if (interim.trim()) {
+        fetch("/api/transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: interim.trim(), isFinal: false }),
+        }).catch(() => undefined);
+      }
+    };
+    rec.onerror = (e) => {
+      setStatus(`mic error: ${e.error ?? "unknown"} — type in the box instead`);
+      stopWebSpeech();
+      invoke("speech:stop", undefined);
+    };
+    rec.onend = () => {
+      webSpeechActive = false;
+      webSpeechRec = null;
+    };
+    webSpeechRec = rec;
+    webSpeechActive = true;
+    rec.start();
+  } catch (err) {
+    setStatus(`mic unavailable: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+export function stopWebSpeech() {
+  webSpeechActive = false;
+  try {
+    webSpeechRec?.stop();
+  } catch {
+    // Already stopped; server state is the truth, reset separately.
+  }
+  webSpeechRec = null;
+}
 
 document.querySelector("#send")?.addEventListener("click", () => {
   sendEdit();
@@ -215,4 +303,14 @@ window.addEventListener("message", (e) => {
 
 refreshHistory();
 
-window.mhacks = { invoke, decideAndEdit, sendEdit, setStatus, setMic, showUndoCircle, refreshHistory };
+window.mhacks = {
+  invoke,
+  decideAndEdit,
+  sendEdit,
+  setStatus,
+  setMic,
+  showUndoCircle,
+  refreshHistory,
+  startWebSpeech,
+  stopWebSpeech,
+};
