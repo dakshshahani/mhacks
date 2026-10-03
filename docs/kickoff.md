@@ -1,6 +1,6 @@
 # Kickoff — Branch Plan (hour 0)
 
-Keys: TYPESAFE (live, probe-tested), ElevenLabs (sponsor), Haiku-class LLM.
+Keys: TYPESAFE (live, probe-tested), ElevenLabs (sponsor), Gemini 3.5 Flash-Lite (thinking off).
 Contracts frozen at hour 3 — read `packages/contracts/` before writing code.
 All branches work ONLY through `@mhacks/contracts` imports. Never import
 another dev's source. Check out your branch, work there, PR into `main`

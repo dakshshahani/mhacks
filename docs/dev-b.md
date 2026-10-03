@@ -9,7 +9,7 @@
 ## 1. Mission in one sentence
 
 Own the decision pipeline — speech + gaze in, committed edit out — by freezing
-`packages/contracts/`, implementing the Jev `DecisionLayer`, the Haiku
+`packages/contracts/`, implementing the Jev `DecisionLayer`, the 3.5 Flash-Lite
 `CodeAgent`, and the pipeline state machine that everyone else renders against.
 
 You are the only person who may approve contract PRs. You are the router that
@@ -21,7 +21,7 @@ keeps 70–80% of the demo on the sub-2s path.
 |---|---|
 | `packages/contracts/` definitions + `mockAgent` / `mockJev` (frozen hour 3) | Mic internals, speech streams (Dev C) |
 | `DecisionLayer` — Jev client + cheap-LLM stub behind one interface | Git plumbing, worktrees, dev-server (Dev C) |
-| `CodeAgent` — Haiku client, narrow diff, agent loop for `large` only | Overlay rendering, screens (PM) |
+| `CodeAgent` — 3.5 Flash-Lite client, narrow diff, agent loop for `large` only | Overlay rendering, screens (PM) |
 | Pipeline state machine `idle → listening → locked → editing → verifying → applied \| failed` | Gaze probing inside webview (Dev A) |
 | `POLICY` thresholds + probe harness (`npm run probe`) | Deciding pixels; you emit `PipelineState`, PM renders it |
 
@@ -59,7 +59,7 @@ Why Jev at all: ~70–500ms, ~$0.001/decision, runs on **every** utterance.
 Vendor numbers are self-reported — you re-measure latency + cost in Phase 1.
 
 Keys are RESOLVED pre-hack: Jev live key probe-tested (6 real decisions
-against `api.typesafe.ai`), Haiku-class code model chosen. No waiting.
+against `api.typesafe.ai`), 3.5 Flash-Lite code model (thinking off) chosen. No waiting.
 
 ## 4. Contracts you own (current shape + required grill fixes)
 
@@ -162,8 +162,8 @@ build DecisionInput (trimmed < STATE_TOKEN_BUDGET 20k, stay under Jev 32k)
 → if inCatalog < 0.7 → escalate to LLM (NEVER force a choice when truth isn't in catalog)
 → else route:
    no-llm → emit EditRequest{op} → Dev C renderer → file write → HMR (~1s)
-   small  → Haiku, narrow diff, path+component pre-resolved (300–800ms)
-   large  → frontier/Haiku agent loop + build check (3–10s, 1–2 demo moments only)
+   small  → 3.5 Flash-Lite, narrow diff, path+component pre-resolved (300–800ms)
+   large  → frontier/3.5 Flash-Lite agent loop + build check (3–10s, 1–2 demo moments only)
 ```
 
 Details:
@@ -181,11 +181,13 @@ Details:
 - Verify pass (Jev `noul`): does diff/screenshot match ask? Below
   `RETRY_THRESHOLD` → one retry (see §7 for the cap-3 grill objection).
 
-## 6. CodeAgent (Haiku) implementation spec
+## 6. CodeAgent (3.5 Flash-Lite) implementation spec
 
 - Input: `{ transcript, target: {selector, componentName, filePath,
   outerHTML snippet, screenshot crop}, projectContext }`.
   `filePath` comes from Dev A's `data-source` attr — no wide codebase search.
+- Config: thinking off (`thinking_budget: 0` / effort `minimal`), temp 0–0.2.
+  Streamy first-token behavior is the point — no reasoning preamble.
 - Loop (for `large` route only): locate source → propose edit → apply in
   worktree → run build/lint → report. Retry once on failure (see §7).
 - Streams short status (`"Editing Navbar.tsx…"`) as `PipelineState.statusLine`
@@ -227,7 +229,7 @@ Locked counterproposal you must implement unless explicitly re-decided:
 | 0–3 | **Freeze contracts + mocks.** `decision.ts` grill fixes (§4), `EditOp` union, `POLICY`, `mockAgent` + `mockJev` deterministic. Collect PM token lists → `COLOR_TOKENS` etc. `contracts check` green on `main`. | Everyone unblocked; THE only hour-3 blocker is you |
 | 3–5 (G1) | Mock edit appears in preview driven by UI buttons (via Dev C channels). Pipeline emits mock `PipelineState` sequence. | PM demos end-to-end on mocks |
 | 5–8 (G2) | Jev disambiguates **real** gaze + **real** ElevenLabs transcript → `mockAgent` applies. Measure sub-2s on catalog edits. | Core loop works with mocks downstream |
-| 8–10 (G3) | **Two small swaps, not one big merge:** real agent (~h9: `mockAgent`→Haiku narrow diff through Dev C executor) then real Jev (~h11: `mockJev`→live Jev). Exercise build-fail envelope. | Real commit + undo works |
+| 8–10 (G3) | **Two small swaps, not one big merge:** real agent (~h9: `mockAgent`→3.5 Flash-Lite narrow diff through Dev C executor) then real Jev (~h11: `mockJev`→live Jev). Exercise build-fail envelope. | Real commit + undo works |
 | 10–17 (G4) | Full real pipeline; re-measure latency on real LLM (vendor numbers were self-reported); failure paths (build-failed, undo in window, webview not-ready). | Demo script passes 3× |
 | 17–21 (G5) | Harden + outsider test (PM runs): look→speak→change→undo unassisted. Freeze tuning with probe-run notes. | Ship or cut to P1 |
 
@@ -241,7 +243,7 @@ TTS + landing-vibecode are the first cuts, never the core loop.
   tune cites the probe run in the PR.
 - Keep the cheap-LLM stub alive all 24h. If Jev rate-limits/errors on stage,
   one env flag swaps it in.
-- Measure ours: Jev p50/p95, Haiku edit round-trip (target <10s; catalog
+- Measure ours: Jev p50/p95, 3.5 Flash-Lite edit round-trip (target <10s; catalog
   <2s), gaze→decision→pixel end-to-end. These numbers go on the pitch slide.
 
 ## 11. Testing checklist
@@ -258,7 +260,7 @@ TTS + landing-vibecode are the first cuts, never the core loop.
 ## 12. Definition of done
 
 - [ ] Contracts frozen hour 3 with grill fixes + mocks on `main`.
-- [ ] Real Jev + real Haiku edit through Dev C's executor; real `commitSha` + undo.
+- [ ] Real Jev + real 3.5 Flash-Lite edit through Dev C's executor; real `commitSha` + undo.
 - [ ] Sub-2s measured on catalog edits (70–80% of scripted demo); full edit <10s.
 - [ ] Retry cap resolved + logged; verify one-retry (or capped-3) enforced.
 - [ ] Look→speak→change→undo ×3 without intervention; ≥80% gaze-pick on demo

@@ -142,7 +142,7 @@ Clean, minimalist, glassmorphism: translucent panels, blur, soft borders, a sing
 | **Pro** | e.g. $20/mo | More tokens, unlimited projects, version history |
 | **BYOK** | $0–$8/mo | Paste your own API key; unlimited usage on your own bill |
 
-**Cost note:** because we pay for everything ourselves, Jev (about $0.04 per million input tokens, free output tokens, per public listings) is nearly free to run on every utterance, while the code LLM is the main cost. Routing "small edits" to a cheaper model via Jev is the margin story for the tiers. *(Grill decision: the code LLM is a Haiku-class small model; tier limits and billing are fully mocked in the demo — pricing cards + local token counter, no Stripe. Pitch references sponsor-subsidized subscriptions.)*
+**Cost note:** because we pay for everything ourselves, Jev (about $0.04 per million input tokens, free output tokens, per public listings) is nearly free to run on every utterance, while the code LLM is the main cost. Routing "small edits" to a cheaper model via Jev is the margin story for the tiers. *(Grill decision: the code LLM is Gemini 3.5 Flash-Lite (thinking off); tier limits and billing are fully mocked in the demo — pricing cards + local token counter, no Stripe. Pitch references sponsor-subsidized subscriptions.)*
 
 Show a live **token usage meter** in the app and an upgrade prompt when the user hits the limit.
 
@@ -159,7 +159,7 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 | **Dependency** | **Why** | **Owner** | **Needed by** |
 | --- | --- | --- | --- |
 | **Jev API key** (TypeSafe AI is in early access/waitlist; we pay for usage) | Decision layer (F5b) | **✅ RESOLVED — working key, live calls confirmed via probe** | Hour 0 |
-| **Code-generating LLM API key** + budget | Code edits (F5) | **✅ RESOLVED — Haiku-class small model chosen** | Hour 0 |
+| **Code-generating LLM API key** + budget | Code edits (F5) | **✅ RESOLVED — 3.5 Flash-Lite (thinking off) chosen** | Hour 0 |
 | Jev question schemas (intent, gaze, risk) drafted and tested | Decision layer | Dev B | Hour 4 |
 | Eye-tracking library tested on a team laptop | Core feature feasibility | Dev A | Hour 2 |
 | Design tokens / `design.md` | All UI work | PM/Designer | Hour 3 |
@@ -174,7 +174,7 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 *(Grill decision: contract-first — all cross-team types/mocks live in `packages/contracts/`, frozen hour 3, changed only via PR to Dev B. Integration gates G1–G5 replace an end-of-hackathon merge. See `AGENTS.md` + `docs/grill-decisions.md`. Load ratio ≈ B 40 / C 25 / A 20 / PM 15.)*
 
 - **Dev A:** Eye tracking, calibration, gaze→element mapping, `data-source` plugin, overlay input (F2, F3, F8)
-- **Dev B:** Contracts package, Jev decision layer, code-editing agent (Haiku), pipeline state machine, retry policy (F5, F5b)
+- **Dev B:** Contracts package, Jev decision layer, code-editing agent (3.5 Flash-Lite), pipeline state machine, retry policy (F5, F5b)
 - **Dev C:** Shell + preview, IPC channels, git service, edit executor + **Tier-1 patch renderer**, speech plumbing — both STT (command capture, Web Speech primary / ElevenLabs Scribe fallback) and TTS (agent narration, P2, behind the same `speech:*` channels) (F1, F4, F5-exec side, F6)
 - **PM/Designer/FE:** Design system, glass UI components, undo circle, speech UI (mic chip w/ sponsor badge, transcript states), BYOK field, token meter, pricing cards (mocked), landing and pricing pages, demo script (F7, F11 UI, F12)
 
@@ -221,7 +221,7 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 
 ## **16. Open Questions**
 
-1. ~~Do we have a Jev key yet, and what are its rate limits and our budget? Which LLM do we use for code edits?~~ **RESOLVED:** live key; Haiku-class code model; vendor claims to be re-measured in Phase 1.
+1. ~~Do we have a Jev key yet, and what are its rate limits and our budget? Which LLM do we use for code edits?~~ **RESOLVED:** live key; 3.5 Flash-Lite code model (thinking off); vendor claims to be re-measured in Phase 1.
 2. Which starting point do we guarantee for the demo (scratch template, repo, or existing website)? **ANSWERED (grill): generic, highly-editable template site; repo/url visible but non-demo.**
 3. Name and brand for the product? **Placeholder until hour 18.**
 4. *(New)* Unlimited-retry policy on failed builds — cap it or accept the churn risk? Must be resolved before code freeze.

@@ -144,7 +144,7 @@ unblock PM/Dev A.
 - Enforces the retry cap (§3.8): error-fed retries ≤3 with build-error context
   appended, then revert to pre-edit state + fail card. User-invoked retry is
   the only unlimited path.
-- G3 definition of done: real Haiku edit through Dev B's agent → real commit
+- G3 definition of done: real 3.5 Flash-Lite edit through Dev B's agent → real commit
   → undo works. The one-line mock→real swap is yours.
 
 ### 5.5 Tier-1 patch renderer — the sub-2s path (~2h, pure code)

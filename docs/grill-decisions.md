@@ -13,11 +13,11 @@ conflict.
 | Speech engine | **ElevenLabs (sponsor)** — used for the demo; PRD header's "no sponsor credits" is **void** |
 | Pricing/landing | **Everything mocked in 24h** — pricing cards + local token counter; no Stripe, no webhooks |
 | Product name | Placeholder until hour 18 |
-| Demo target | **A deliberately generic, highly-editable site** (easy for Jev to command + Haiku to edit); open-repo/URL stay visible in UI as non-demo paths |
+| Demo target | **A deliberately generic, highly-editable site** (easy for Jev to command + 3.5 Flash-Lite to edit); open-repo/URL stay visible in UI as non-demo paths |
 | Priority | Core loop working on the demo site + PM-designed clean UI; landing page kept short |
 | Eye tracking | **WebGazer.js — tested on a team laptop** (PRD's 100–200px is still vendor-adjacent; measure our own in the spike) |
 | Shell | **React project; Electron wrap only if it doesn't threaten the core loop** |
-| Code-editing model | **Haiku-class small model** (small route) |
+| Code-editing model | **Gemini 3.5 Flash-Lite, thinking off** (small route, replaces Haiku) |
 | Apply UX | **Auto-apply every edit. No Confirm dialogs.** A 5-second undo circle appears; **look at it with ~500ms dwell → undo; click also undoes** |
 | Import site/URL | **Cut entirely from the demo.** Options stay in the UI but route to "not yet" states |
 | Landing page build | Designed in Figma, then **vibecoded inside our own app by the PM** (dogfooding showcase) |

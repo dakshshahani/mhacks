@@ -8,7 +8,7 @@ Companion to AGENTS.md. Contracts: `packages/contracts/`. Locked decisions in
 ## Dev B — Orchestrator (the integration hub)
 
 **Works with:** Jev API (`api.typesafe.ai/v1/systemone`, live key in hand),
-Haiku-class small model, the contract types, the pipeline state machine.
+3.5 Flash-Lite small model (thinking off), the contract types, the pipeline state machine.
 
 **What they own:**
 1. `packages/contracts/` — definitions AND the two mocks (`mockAgent`,
@@ -18,7 +18,7 @@ Haiku-class small model, the contract types, the pipeline state machine.
    trimmed state (< 20k tokens, `POLICY.STATE_TOKEN_BUDGET`), maps answers
    into a `Decision`. Behind one interface so the cheap-LLM stub can swap in
    if Jev misbehaves mid-demo.
-3. `CodeAgent` — Haiku client: gets path + component pre-resolved by Jev, so
+3. `CodeAgent` — 3.5 Flash-Lite client (thinking off): gets path + component pre-resolved by Jev, so
    no wide codebase search. Output constrained to a narrow diff. Runs agent
    loop for `large` route only.
 4. Tier-1 patch renderer — the `EditOp` union becomes deterministic
@@ -32,7 +32,7 @@ Haiku-class small model, the contract types, the pipeline state machine.
 - Hour 5 (G1): mock edit appears in the preview, driven by UI buttons
 - Hour 8 (G2): Jev disambiguates real gaze + real ElevenLabs transcript →
   mockAgent applies. Sub-2s measured on catalog edits
-- Hour 10 (G3): `mockJev` → real Jev; real Haiku edit through Dev C's
+- Hour 10 (G3): `mockJev` → real Jev; real 3.5 Flash-Lite edit through Dev C's
   executor; build-fail envelope exercised
 - Hour 17 (G4): full real pipeline; latency budget re-measured on real LLM
   (vendor numbers were self-reported — measure ours)
@@ -40,7 +40,7 @@ Haiku-class small model, the contract types, the pipeline state machine.
 **Never owns:** mic internals, git plumbing, overlay rendering.
 
 **Failure modes to build for:** Jev timeout (>1.5s → route directly to LLM),
-inCatalog < 0.7 → escalate, Haiku build-fail (RETRY POLICY — see objection in
+inCatalog < 0.7 → escalate, 3.5 Flash-Lite build-fail (RETRY POLICY — see objection in
 grill-decisions), transcript empty → drop as chatter.
 
 ---
@@ -159,7 +159,7 @@ types, mockAgent events, AI builders (v0/Cursor-class) for any code.
 |---|---|---|---|
 | G1 | ~5 | UI + mockAgent end-to-end via Dev C channels | Dev C |
 | G2 | ~8 | Real gaze + real speech → mock edit in real DOM | Dev A, Dev B |
-| G3 | ~10 | Real Jev + real Haiku edit, real commit + undo | Dev B, Dev C |
+| G3 | ~10 | Real Jev + real 3.5 Flash-Lite edit, real commit + undo | Dev B, Dev C |
 | G4 | ~17 | Full real pipeline incl. undo circle + tiers | everyone |
 | G5 | ~21 | Someone outside the team: look→speak→change→undo unassisted | PM |
 
