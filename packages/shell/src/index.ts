@@ -4,3 +4,6 @@
 export * from "./tier1";
 export * from "./git";
 export * from "./executor";
+export * from "./preview";
+export * from "./speech";
+export * from "./safeStorage";
