@@ -150,8 +150,13 @@ const useMockJev = process.env.MOCK_JEV === "1";
 const jevLayer = useMockJev ? mockJev : createJevLayer();
 
 // speech:start doubles as the pipeline entry + Dev A lock-on signal.
+// Symmetrically, dropping to off while merely listening (mute/stop with no
+// edit in flight) releases the pipeline back to idle — otherwise the next
+// send would 409 against a stale listening stage. An in-flight decide
+// re-enters listening itself after its probe, so this reset can't strand one.
 speech.onState((s) => {
   if (s === "listening") pipeline.startListening();
+  if (s === "off" && pipeline.getState().stage === "listening") pipeline.reset();
   broadcast({ type: "speech-state", state: s });
 });
 speech.onTranscript((event) => broadcast({ type: "speech-transcript", event }));
