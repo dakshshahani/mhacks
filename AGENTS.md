@@ -2,7 +2,9 @@
 
 Look → speak → code changes. A desktop app where an agent maker points at a UI
 element with their eyes, says what they want, and an editing agent applies the
-change to real source files with one-click Undo.
+change to real source files — auto-applied, with a gaze-at-the-undo-circle
+mechanic. Locked interview decisions: `docs/grill-decisions.md` (overrides the
+PRD where they conflict).
 
 > **Read before editing anything.** This file defines the architecture, the
 > ownership seams, and the contracts. Disagreements with reality should be
@@ -35,7 +37,7 @@ Jev output is never shown as prose.
 | Intent classification | Jev `choice` | style/layout/content/add/delete/other |
 | Gaze disambiguation | Jev `choice` | among 2–5 candidate elements |
 | Actionability gate | Jev `noul` | drops background chatter |
-| Apply policy | Jev `score` | risk; small edits auto-apply, large require Confirm |
+| Apply policy | Jev `score` | risk widens the 5s undo-window; never a Confirm dialog |
 | Route | Jev `choice` | no-llm / small / large — token spend control |
 | Verify | Jev `noul` | does the diff match the ask; one retry max |
 
@@ -134,9 +136,9 @@ thresholds (`AUTOMATION_MIN`, `ACTIONABLE_MIN`, `RETRY_THRESHOLD`,
 
 | Button | Meaning | Implementation path |
 | --- | --- | --- |
-| Confirm | commit one edit | `git:confirm` on the pre-commit `sha` |
+| Confirm | commit one edit | `git:confirm` on the pre-commit `sha` (power path; demo path is the undo circle) |
 | New Version | branch for a bigger change | `git:createSnapshot` |
-| Undo | revert last edit | `git:undo` |
+| Undo | revert last edit | `git:undo` — triggered by ~500ms gaze dwell or click on the undo circle during the 5s window |
 | Version history | timestamps of edits | `git:history` |
 
 Worktrees + branches isolate every edit. Build-gate everything before

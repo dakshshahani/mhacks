@@ -60,8 +60,13 @@ export type PipelineStage =
   | "applied"
   | "failed";
 
-/** Whether the UI should render Confirm/Undo now or auto-apply silently. */
-export type PendingAction = "confirm" | "auto-applied" | null;
+/**
+ * Apply UX (locked by grill interview): every edit auto-applies; a 5s undo
+ * circle appears and ~500ms gaze dwell (or a click) on it reverts the edit.
+ * `undo-window` drives that circle; longer/higher risk widens it. There are
+ * no Confirm dialogs in the demo path.
+ */
+export type PendingAction = "undo-window" | "confirm" | null;
 
 export interface PipelineState {
   stage: PipelineStage;
