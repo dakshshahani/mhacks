@@ -106,7 +106,7 @@ Jev takes structured or unstructured state plus typed questions we define in adv
 | Intent | Choice: `style`, `layout`, `content`, `add element`, `delete`, `question/other` | Picks the edit prompt and tools for the LLM |
 | Gaze disambiguation | Choice among the 2-5 candidate elements near the gaze point, given the transcript | Resolves "this" when gaze is jittery |
 | Is it actionable? | Yes/no probability | Ignores background chatter or filler speech |
-| Apply policy | Score for risk/size of change | Auto-apply small edits; require Confirm for big ones |
+| Apply policy | Score for risk/size of change | *(Grill decision: locked)* Auto-apply **every** edit; risk widens the 5s undo-window instead of gating a Confirm dialog. No Confirm modals in the demo path |
 | Route | Choice: `no LLM needed`, `small LLM`, `large LLM` | Controls token spend per tier |
 | Verify | Yes/no: does the diff or screenshot match the request? | Triggers one retry before the user sees it |
 
@@ -142,13 +142,13 @@ Clean, minimalist, glassmorphism: translucent panels, blur, soft borders, a sing
 | **Pro** | e.g. $20/mo | More tokens, unlimited projects, version history |
 | **BYOK** | $0–$8/mo | Paste your own API key; unlimited usage on your own bill |
 
-**Cost note:** because we pay for everything ourselves, Jev (about $0.04 per million input tokens, free output tokens, per public listings) is nearly free to run on every utterance, while the code LLM is the main cost. Routing "small edits" to a cheaper model via Jev is the margin story for the tiers.
+**Cost note:** because we pay for everything ourselves, Jev (about $0.04 per million input tokens, free output tokens, per public listings) is nearly free to run on every utterance, while the code LLM is the main cost. Routing "small edits" to a cheaper model via Jev is the margin story for the tiers. *(Grill decision: the code LLM is a Haiku-class small model; tier limits and billing are fully mocked in the demo — pricing cards + local token counter, no Stripe. Pitch references sponsor-subsidized subscriptions.)*
 
 Show a live **token usage meter** in the app and an upgrade prompt when the user hits the limit.
 
 ## **9. Technical Architecture (high level)**
 
-- **Desktop:** Electron + React + Tailwind. Preview in a `<webview>`/BrowserView so we can inspect the DOM.
+- **Desktop:** Electron + React + Tailwind. Preview in a `<webview>`/BrowserView so we can inspect the DOM. *(Grill decision: build React-first; wrap in Electron only if it doesn't threaten the core loop — the demo shell is whichever is running at the G3 gate)*
 - **Local services (Electron main):** git operations, file edits, dev server process manager.
 - **Decision + edit pipeline:** speech → Jev (intent, target, confidence, risk) → code LLM (edit) → Jev (verify) → apply.
 - **Backend:** thin API (Vercel serverless functions) proxying LLM calls, enforcing tier limits, and handling Stripe webhooks. BYOK calls can go direct from the app.
@@ -158,8 +158,8 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 
 | **Dependency** | **Why** | **Owner** | **Needed by** |
 | --- | --- | --- | --- |
-| **Jev API key** (TypeSafe AI is in early access/waitlist; we pay for usage) | Decision layer (F5b) | TBD | Hour 0; join the waitlist now |
-| **Code-generating LLM API key** + budget | Code edits (F5) | TBD | Hour 0 |
+| **Jev API key** (TypeSafe AI is in early access/waitlist; we pay for usage) | Decision layer (F5b) | **✅ RESOLVED — working key, live calls confirmed via probe** | Hour 0 |
+| **Code-generating LLM API key** + budget | Code edits (F5) | **✅ RESOLVED — Haiku-class small model chosen** | Hour 0 |
 | Jev question schemas (intent, gaze, risk) drafted and tested | Decision layer | Dev B | Hour 4 |
 | Eye-tracking library tested on a team laptop | Core feature feasibility | Dev A | Hour 2 |
 | Design tokens / `design.md` | All UI work | PM/Designer | Hour 3 |
@@ -171,23 +171,25 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 
 ## **11. Suggested Team Split**
 
+*(Grill decision: contract-first — all cross-team types/mocks live in `packages/contracts/`, frozen hour 3, changed only via PR to Dev B. Integration gates G1–G5 replace an end-of-hackathon merge. See `AGENTS.md` + `docs/grill-decisions.md`. Load ratio ≈ B 40 / C 25 / A 20 / PM 15.)*
+
 - **Dev A:** Eye tracking, calibration, gaze→element mapping, overlay (F2, F3, F8)
 - **Dev B:** Jev decision layer, code-editing agent, DOM→source mapping, edit pipeline (F5, F5b)
 - **Dev C:** Electron shell, git workflow, BYOK, Vercel/Stripe (F1, F6, F9, F11)
 - **PM/Designer/FE:** Design system, glass UI components, speech toggle, landing and pricing pages, demo script (F7, F4 UI, F12). Start with components that are mostly layout and styling, and pair with Dev C for Electron-specific pieces.
 
-## **12. Timeline (adjust to hackathon length)**
+## **12. Timeline (24 hours — fixed by grill)**
 
-1. **Phase 1 – Spike (first ~20%):** Confirm Jev and LLM keys, prove gaze→element on a static page, finalize design tokens.
-2. **Phase 2 – Core loop (next ~40%):** Look + speak + agent edit + reload on the template project.
-3. **Phase 3 – Product layer (next ~25%):** Git buttons, slider, BYOK, tiers, landing page.
-4. **Phase 4 – Polish & demo (final ~15%):** Bug freeze, rehearse, record a backup video.
+1. **Phase 1 – Spike (~4.8h / first 20%):** Confirm Jev and LLM keys ✅ (done pre-hack), prove gaze→element on a static page, freeze contracts (hour 3), finalize design tokens.
+2. **Phase 2 – Core loop (~9.6h / 40%):** Look + speak + agent edit + reload on the template project. Gates G1–G2 land here.
+3. **Phase 3 – Product layer (~6h / 25%):** Undo circle, git buttons, slider, mocked tiers, landing (Figma → vibecoded), G3–G4 gates.
+4. **Phase 4 – Polish & demo (~3.6h / 15%):** Bug freeze, rehearse, record backup video, name decided by hour 18.
 
 ## **13. Success Criteria**
 
-- Demo completes the look → speak → change → undo loop **3 times in a row** without intervention.
+- Demo completes the look → speak → change → look-at-undo-circle loop **3 times in a row** without intervention.
 - Gaze highlight picks the intended component at least ~80% of the time on the demo project.
-- Agent edit round-trip under ~10 seconds.
+- Agent edit round-trip under ~10s; catalog edits (≈70–80% of the scripted demo) sub-2s.
 - A judge with no Git knowledge can undo a change.
 
 ## **14. Risks & Mitigations**
@@ -196,8 +198,9 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 | --- | --- | --- |
 | Webcam gaze is too inaccurate/jittery | Core feature feels broken | Component-level snapping, slider, click-to-select fallback, good lighting in the demo |
 | DOM → source file mapping on arbitrary repos | Agent edits wrong file | Demo on our template; use dev-time source attributes; "existing repo" as a stretch |
-| LLM edits break the build | Bad demo moment | Worktree isolation, build check, one-click undo |
+| LLM edits break the build | Bad demo moment | Worktree isolation, build check, gaze-undo circle. *(Grill decision: user chose unlimited retries — logged objection stands: cap 3 error-fed retries, then fail card. Resolve before freeze)* |
 | Speech misrecognition | Wrong command | Show transcript before applying (editable) |
+| Import-site promises made on stage | Credibility hit | Cut from demo; answer with "not yet" path |
 | Jev access delayed (early access/waitlist) | No decision layer | Build behind an interface; stub with a cheap LLM call, swap in Jev when the key arrives |
 | Jev gives no reasoning and can be wrong | Hard to debug misroutes | Log inputs/outputs, show confidence, keep the click-to-select and Undo fallbacks |
 | Jev vendor claims are self-reported benchmarks | Speed/cost may differ | Measure our own latency and cost in Phase 1 |
@@ -208,13 +211,15 @@ Show a live **token usage meter** in the app and an upgrade prompt when the user
 
 1. Open the app and start from the template site (show the glass UI).
 2. Calibrate quickly; adjust the sensitivity slider.
-3. Look at the hero heading → overlay locks on → say "make this bigger and use a gradient."
+3. Look at the hero heading → overlay locks on → say "make this bigger and use a gradient." → auto-applies; point out the 5s undo circle.
 4. Look at a button → "make it rounded and add a hover animation."
-5. Tap **Undo**, then **Confirm**.
+5. Undo one edit by looking at the undo circle, then show version history.
 6. Show the pricing tiers, the token meter, and the BYOK key field.
+7. *(If the core loop passed its gates only)* Show the landing page vibecoded inside the app by the PM — dogfooding beat. Fallback: static Figma export.
 
 ## **16. Open Questions**
 
-1. Do we have a Jev key yet, and what are its rate limits and our budget? Which LLM do we use for code edits?
-2. Which starting point do we guarantee for the demo (scratch template, repo, or existing website)?
-3. Name and brand for the product?
+1. ~~Do we have a Jev key yet, and what are its rate limits and our budget? Which LLM do we use for code edits?~~ **RESOLVED:** live key; Haiku-class code model; vendor claims to be re-measured in Phase 1.
+2. Which starting point do we guarantee for the demo (scratch template, repo, or existing website)? **ANSWERED (grill): generic, highly-editable template site; repo/url visible but non-demo.**
+3. Name and brand for the product? **Placeholder until hour 18.**
+4. *(New)* Unlimited-retry policy on failed builds — cap it or accept the churn risk? Must be resolved before code freeze.
