@@ -3,3 +3,4 @@
 // Each capability module re-exports itself here as it lands.
 export * from "./tier1";
 export * from "./git";
+export * from "./executor";
