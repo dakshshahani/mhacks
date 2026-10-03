@@ -7,3 +7,4 @@ export * from "./executor";
 export * from "./preview";
 export * from "./speech";
 export * from "./safeStorage";
+export * from "./devServer";
