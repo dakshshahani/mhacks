@@ -70,8 +70,10 @@ await devServer.watch(demoRoot).catch((err) => {
 
 /** Template-scoped build gate. The demo tree has no compiler; this checks
  *  what a bad edit observably breaks: empty files, unbalanced delimiters,
- *  dropped data-source mapping. Lenient by design — Tier-1 class/text edits
- *  always pass; a suspicious LLM diff fails safe into the fail card. */
+ *  dropped data-source mapping, and model output in the wrong shape (a
+ *  unified diff or fenced block instead of file content). Lenient by design
+ *  — Tier-1 class/text edits always pass; a suspicious LLM diff fails safe
+ *  into the fail card. */
 function templateBuildGate() {
   return {
     check: async (filesChanged) => {
@@ -79,6 +81,9 @@ function templateBuildGate() {
         const text = await readFile(join(demoRoot, rel), "utf8").catch(() => null);
         if (text === null) return { ok: false, message: `gate: cannot read ${rel}` };
         if (text.trim().length === 0) return { ok: false, message: `gate: ${rel} is empty` };
+        if (/^```/m.test(text) || /^(@@|--- |\+\+\+ |diff --git )/m.test(text)) {
+          return { ok: false, message: `gate: ${rel} looks like a diff, not file content` };
+        }
         for (const [open, close] of [["{", "}"], ["(", ")"], ["[", "]"]]) {
           const opens = text.split(open).length;
           const closes = text.split(close).length;
@@ -112,10 +117,17 @@ const router = new IpcRouter({
       const text = await readFile(join(demoRoot, address.filePath), "utf8").catch(() => null);
       return text === null ? null : text.slice(0, 2000);
     },
-    // small/large routes: Flash-Lite narrow diff. Null without a key (or on
-    // outage) — the executor then falls back to the Tier-1 hint or fails
-    // the envelope honestly; never a silent no-op.
-    generateDiff: (req) => generateNarrowDiff(req),
+    // small/large routes: Flash-Lite full-file rewrite. Null without a key (or
+    // on outage) — the executor then falls back to the Tier-1 hint or fails
+    // the envelope honestly; never a silent no-op. attempt/lastError feed the
+    // error-fed retry context the grill locked in.
+    generateDiff: (req, ctx) =>
+      generateNarrowDiff(req, {
+        currentText: ctx.currentText,
+        parentSection: ctx.parentSection,
+        lastError: ctx.lastError,
+        attempt: ctx.attempt,
+      }),
     buildGate: templateBuildGate(),
     didReload: () => devServer.waitForReload(2000),
   },

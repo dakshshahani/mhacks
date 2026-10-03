@@ -230,9 +230,19 @@ export async function decideAndEdit(
     } else {
       const retry = await services.submitEdit(req);
       if (!retry.ok) {
-        pipeline.fail(retry.message);
+        // The first apply above is real and committed — report it (unverified)
+        // rather than an error that claims nothing applied. Fail-open: the
+        // build gate passed and Undo covers it.
+        pipeline.apply();
         speech.resetToIdle();
-        return { kind: "error", message: retry.message };
+        return {
+          kind: "applied",
+          decision,
+          editRequest: req,
+          editResult: submit.value,
+          undoWindowMs: undoWindowMs(decision.riskScore),
+          verified: false,
+        };
       }
       const second = await services.verify(text, diffSummaryFor(req, retry.value));
       verified = second.matches >= POLICY.RETRY_THRESHOLD;

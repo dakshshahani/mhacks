@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "dev": "node --experimental-strip-types --import ../../packages/shell/dev-register.mjs ./src/dev-server.mjs"
+    "dev": "node --experimental-strip-types --env-file=../../.env --import ../../packages/shell/dev-register.mjs ./src/dev-server.mjs"
   },
   "dependencies": {
     "@mhacks/contracts": "workspace:*",

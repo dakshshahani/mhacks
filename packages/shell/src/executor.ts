@@ -33,7 +33,15 @@ export interface ExecutorDeps {
   readParentSection?: (address: ParentAddress) => Promise<string | null>;
   generateDiff?: (
     req: EditRequest,
-    context: { parentSection: string | null; attempt: number; lastError: string | null },
+    context: {
+      parentSection: string | null;
+      /** Full current text of the target file. The generator must return
+       *  complete replacement file content (never a unified diff — applying
+       *  diffs is Dev C+1 work); without this the model can only guess. */
+      currentText: string;
+      attempt: number;
+      lastError: string | null;
+    },
   ) => Promise<string | null>;
   buildGate?: BuildGate;
   didReload?: () => boolean | Promise<boolean>;
@@ -102,7 +110,12 @@ export async function submitEdit(
         nextText = null;
       }
     } else if (deps.generateDiff) {
-      const diff = await deps.generateDiff(req, { parentSection, attempt, lastError });
+      const diff = await deps.generateDiff(req, {
+        parentSection,
+        currentText: original,
+        attempt,
+        lastError,
+      });
       if (diff !== null) {
         // Narrow-diff path: generator returns full replacement text for the
         // target file in this harness (unified-diff apply is Dev C+1 work).
