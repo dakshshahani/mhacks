@@ -246,7 +246,28 @@ async function handleDecideAndEdit(body, res) {
     sendJson(res, 400, { ok: false, code: "unknown", message: "x/y must be numbers" });
     return;
   }
-  const outcome = await decideAndEdit(transcript, x, y, {
+  // Transport-owned mutual exclusion (decide.ts only refuses mid-edit
+  // stages). Checked and claimed synchronously — no await between, so two
+  // racing sends can't both enter.
+  const st = pipeline.getState().stage;
+  if (
+    decideActive > 0 ||
+    st === "locked" ||
+    st === "editing" ||
+    st === "verifying"
+  ) {
+    sendJson(res, 409, {
+      ok: false,
+      code: "unknown",
+      message: `pipeline is ${decideActive > 0 ? "busy" : st}; wait for applied/failed`,
+    });
+    return;
+  }
+  decideActive += 1;
+  const t0 = Date.now();
+  let outcome;
+  try {
+    outcome = await decideAndEdit(transcript, x, y, {
     decide: jevLayer,
     submitEdit: (req) => router.invoke("agent:submitEdit", req),
     verify: (t, diffSummary) => verifyDecision({ transcript: t, diffSummary }),
@@ -266,7 +287,7 @@ async function handleDecideAndEdit(body, res) {
     case "applied": {
       const d = outcome.decision;
       console.log(
-        `[pipeline] applied route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)}`,
+        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)}`,
       );
       sendJson(res, 200, {
         ok: true,
@@ -282,17 +303,39 @@ async function handleDecideAndEdit(body, res) {
       sendJson(res, 200, { ok: true, dropped: true, decision: outcome.decision });
       return;
     case "busy":
+      // Unreachable while the transport counter above holds (kept for the
+      // direct-call shape): release the claim anyway via finally below.
       sendJson(res, 409, { ok: false, code: "unknown", message: outcome.message });
       return;
     case "error":
+      console.log(`[pipeline] error after ${Date.now() - t0}ms: ${outcome.message}`);
       sendJson(res, 422, { ok: false, code: "build-failed", message: outcome.message });
       return;
   }
+  } finally {
+    decideActive -= 1;
+  }
 }
+
+// In-flight decide count. Checked + claimed with no await between, so it is
+// the atomic mutual-exclusion signal; pipeline stages alone can't serve
+// because `listening` also means merely speech-armed.
+let decideActive = 0;
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (req.method === "GET" && url.pathname === "/api/events") {
+    // Reconcile before replaying: `processing` is only legal alongside a
+    // live decide (counter > 0 or a mid-edit stage). Anything else is an
+    // orphaned utterance (failed send, reload mid-flow) — release it so a
+    // fresh subscribe never restores a stuck chip.
+    if (
+      speech.currentState === "processing" &&
+      decideActive === 0 &&
+      !["locked", "editing", "verifying"].includes(pipeline.getState().stage)
+    ) {
+      speech.resetToIdle();
+    }
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",

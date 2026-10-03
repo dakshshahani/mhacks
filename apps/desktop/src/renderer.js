@@ -16,6 +16,15 @@ let undoTimer;
 let lastPoint = null;
 let prevStage = "idle";
 let lastApplied = null;
+let editStartAt = 0;
+let editTimer;
+
+function stopEditTimer() {
+  if (editTimer !== undefined) {
+    clearInterval(editTimer);
+    editTimer = undefined;
+  }
+}
 
 export function setStatus(line) {
   if (statusEl) statusEl.textContent = line;
@@ -57,11 +66,19 @@ export async function invoke(channel, req) {
 }
 
 export async function decideAndEdit(transcript, x, y) {
-  const res = await fetch("/api/decide-and-edit", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transcript, x, y }),
-  });
+  let res;
+  try {
+    res = await fetch("/api/decide-and-edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript, x, y }),
+    });
+  } catch {
+    // Server unreachable mid-send: release the mic so the chip can't strand
+    // in listening/processing with no pipeline behind it.
+    await invoke("speech:stop", undefined);
+    return { status: 0, body: { ok: false, code: "unknown", message: "server unreachable" } };
+  }
   return { status: res.status, body: await res.json() };
 }
 
@@ -136,6 +153,33 @@ export async function sendEdit(transcript) {
 }
 
 function renderPipeline(state) {
+  // Gate the send button on pipeline activity: double-sends while busy just
+  // 409, so prevent them at the source. Dropped resolves to idle (reset
+  // broadcasts), which re-enables.
+  const sendBtn = document.querySelector("#send");
+  if (sendBtn) {
+    sendBtn.disabled =
+      state.stage === "listening" ||
+      state.stage === "locked" ||
+      state.stage === "editing" ||
+      state.stage === "verifying";
+  }
+  // Elapsed clock on model-bound stages: a 40s small-route edit should read
+  // as working, not stuck. Ticks only across editing/verifying.
+  if (
+    (state.stage === "editing" || state.stage === "verifying") &&
+    prevStage !== state.stage
+  ) {
+    editStartAt = Date.now();
+    stopEditTimer();
+    const label = state.statusLine ?? state.stage;
+    editTimer = setInterval(() => {
+      const s = Math.round((Date.now() - editStartAt) / 1000);
+      setStatus(`${label} (${s}s — model working)`);
+    }, 1000);
+  } else if (state.stage !== "editing" && state.stage !== "verifying") {
+    stopEditTimer();
+  }
   if (state.stage === "applied" && prevStage !== "applied") {
     // Edge-triggered from the last /api/decide-and-edit response (which
     // carries undoWindowMs); the event alone re-renders the status line.

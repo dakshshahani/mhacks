@@ -164,13 +164,21 @@ export async function decideAndEdit(
   services: DecideServices,
 ): Promise<DecideOutcome> {
   const { pipeline, speech } = services;
+  // Mutual exclusion is the caller's in-flight counter (concurrency belongs
+  // to the transport, not the composer). Only true mid-edit stages refuse
+  // entry here: `listening` merely means speech armed (toggle or a prior
+  // start) — entering from it is the normal mic flow, and startListening
+  // below safely no-ops.
   const stage = pipeline.getState().stage;
-  if (stage === "listening" || stage === "locked" || stage === "editing" || stage === "verifying") {
+  if (stage === "locked" || stage === "editing" || stage === "verifying") {
     return { kind: "busy", message: `pipeline is ${stage}; wait for applied/failed` };
   }
 
   const text = transcript.trim();
   if (text.length === 0) {
+    // Void utterance while armed: release the mic instead of stranding it
+    // in listening (the pipeline was never entered, so nothing else cleans up).
+    if (speech.currentState !== "off") speech.resetToIdle();
     return { kind: "error", message: "empty transcript: nothing to decide" };
   }
 
@@ -180,7 +188,16 @@ export async function decideAndEdit(
     speech.start();
   }
 
-  const frame = await services.queryFrame(x, y);
+  let frame;
+  try {
+    frame = await services.queryFrame(x, y);
+  } catch (err) {
+    // Probe failure enters nothing downstream: release the mic we started so
+    // the chip can't strand in listening. The error still propagates for its
+    // envelope mapping (not-ready/wv-gone).
+    if (speech.currentState !== "off") speech.resetToIdle();
+    throw err;
+  }
   pipeline.startListening();
 
   // Harness lock-on emulation: Dev A's client freezes lockedTarget on
