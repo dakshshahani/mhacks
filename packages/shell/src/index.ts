@@ -8,3 +8,4 @@ export * from "./preview";
 export * from "./speech";
 export * from "./safeStorage";
 export * from "./devServer";
+export * from "./ipcRouter";
