@@ -17,23 +17,11 @@ export const PASS_GATE: BuildGate = {
   check: () => Promise.resolve({ ok: true }),
 };
 
-export interface ParentAddress {
-  componentName: string | null;
-  filePath: string | null;
-}
-
-/** Forward-compat parent: newest dev-c.md §5.4b carries parent as address-only.
- *  Current contract has references[] but no parent field, so accept both. */
-export type EditRequestWithParent = EditRequest & {
-  parent?: ParentAddress;
-};
-
 export interface ExecutorDeps {
   git: FileGitService;
   readFile: (absPath: string) => Promise<string>;
   writeFile: (absPath: string, text: string) => Promise<void>;
   resolveRoot: (filePath: string | null) => string;
-  readParentSection?: (address: ParentAddress) => Promise<string | null>;
   generateDiff?: (
     req: EditRequest,
     context: { parentSection: string | null; attempt: number; lastError: string | null },
@@ -41,6 +29,21 @@ export interface ExecutorDeps {
   buildGate?: BuildGate;
   didReload?: () => boolean | Promise<boolean>;
   now?: () => number;
+}
+
+/** Enclosing layout context, derived from the target file text the executor
+ *  already read: a window around the target's data-source marker, else the
+ *  file head. Free model context for retries — no extra I/O, no wire growth.
+ *  Cross-file parents ride EditRequest.references (Dev B populates). */
+export function enclosingContext(
+  fileText: string,
+  filePath: string | null,
+): string {
+  const marker = filePath ? `data-source="${filePath}` : "";
+  const idx = marker ? fileText.indexOf(marker) : -1;
+  if (idx < 0) return fileText.slice(0, 2000);
+  const start = Math.max(0, idx - 1000);
+  return fileText.slice(start, start + 2000);
 }
 
 /** Pure helper so the cap is testable without I/O. */
@@ -53,11 +56,10 @@ function envelopeFail(message: string): IpcResult<EditResult> {
 }
 
 export async function submitEdit(
-  raw: EditRequest,
+  req: EditRequest,
   deps: ExecutorDeps,
 ): Promise<IpcResult<EditResult>> {
-  const req = raw as EditRequestWithParent;
-  const t0 = (deps.now ?? Date.now)();
+  const startMs = (deps.now ?? Date.now)();
   const gate = deps.buildGate ?? PASS_GATE;
 
   const targetPath = req.target.filePath;
@@ -73,16 +75,9 @@ export async function submitEdit(
     return envelopeFail(`cannot read ${targetPath}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // §5.4b: resolve parent address at apply time (content at apply, address on wire).
-  let parentSection: string | null = null;
-  const parent = req.parent;
-  if (parent && parent.filePath && deps.readParentSection) {
-    try {
-      parentSection = await deps.readParentSection(parent);
-    } catch {
-      parentSection = null;
-    }
-  }
+  // §5.4b: enclosing context derived from text already read — content at
+  // apply time, nothing extra on the wire.
+  const parentSection: string | null = enclosingContext(original, targetPath);
 
   // Baseline so Undo always has somewhere to go: capture pre-edit state
   // before mutating. Post-edit pre-commit below is the second half.
@@ -143,15 +138,15 @@ export async function submitEdit(
     const gateRes = await gate.check([targetPath]);
     if (gateRes.ok) {
       const snap = await deps.git.createSnapshot(`edit ${req.id}`);
-      const hot = deps.didReload ? await deps.didReload() : false;
-      const durationMs = (deps.now ?? Date.now)() - t0;
+      const reloaded = deps.didReload ? await deps.didReload() : false;
+      const durationMs = (deps.now ?? Date.now)() - startMs;
       const value: EditResult = {
         id: req.id,
         status: "applied",
         filesChanged: [targetPath],
         commitSha: snap.sha,
         durationMs,
-        hotReloaded: hot === true,
+        hotReloaded: reloaded === true,
       };
       return { ok: true, value };
     }

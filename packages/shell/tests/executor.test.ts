@@ -1,5 +1,5 @@
 // Executor: truth boundary — real commitSha/filesChanged, build-failed
-// envelope + revert, retry cap, parent-address forward-compat.
+// envelope + revert, retry cap, enclosing-context derivation.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
@@ -8,7 +8,7 @@ import * as path from "node:path";
 import type { EditRequest } from "../../contracts/src/agent";
 import type { ElementCandidate } from "../../contracts/src/gaze";
 import { FileGitService } from "../src/git";
-import { submitEdit, shouldRetry, type EditRequestWithParent } from "../src/executor";
+import { submitEdit, shouldRetry } from "../src/executor";
 import { POLICY } from "../../contracts/src/decision";
 
 function candidate(over: Partial<ElementCandidate> = {}): ElementCandidate {
@@ -123,26 +123,42 @@ describe("executor", () => {
     assert.equal(shouldRetry(3), false);
   });
 
-  it("parent address is resolved at apply time (forward-compat §5.4b)", async () => {
+  it("parent context derives from the target file (§5.4b, no extra I/O)", async () => {
     const { root } = await makeRoot();
+    await fs.writeFile(
+      path.join(root, "Marked.tsx"),
+      `<main className="flex justify-center" data-source="Marked.tsx:1">\n  <h1 data-source="Marked.tsx:2">Hi</h1>\n</main>`,
+    );
     const git = new FileGitService(root);
     let seenParent: string | null = null;
     const res = await submitEdit(
-      { ...req({ route: "small" }), parent: { componentName: "Layout", filePath: "Parent.tsx" } } as EditRequestWithParent,
+      req({ route: "small", target: candidate({ filePath: "Marked.tsx" }) }),
       {
         git,
         ...memIO(root),
-        readParentSection: (addr) => {
-          assert.equal(addr.filePath, "Parent.tsx");
-          return fs.readFile(path.join(root, addr.filePath as string), "utf8");
-        },
         generateDiff: (_r, ctx) => {
           seenParent = ctx.parentSection;
-          return Promise.resolve(`<div className="hero bg-accent">Hello</div>`);
+          return Promise.resolve(`<main>Hi</main>`);
         },
       },
     );
     assert.equal(res.ok, true);
     assert.match(String(seenParent), /justify-center/);
+  });
+
+  it("parent context falls back to file head without markers", async () => {
+    const { root } = await makeRoot();
+    const git = new FileGitService(root);
+    let seenParent: string | null = null;
+    const res = await submitEdit(req({ route: "small" }), {
+      git,
+      ...memIO(root),
+      generateDiff: (_r, ctx) => {
+        seenParent = ctx.parentSection;
+        return Promise.resolve(`<div>Hi</div>`);
+      },
+    });
+    assert.equal(res.ok, true);
+    assert.match(String(seenParent), /bg-muted/);
   });
 });

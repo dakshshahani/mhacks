@@ -38,13 +38,16 @@ export const ALIGN_CLASS: Record<string, string> = {
 };
 
 const RADIUS_VALUES = new Set<string>([...RADIUS_TOKENS]);
-const SPACING_VALUES = new Set<string>(SPACING_CLASS_SPACING_VALUES());
+const SPACING_VALUES: Set<string> = new Set([
+  "p-2",
+  "p-4",
+  "p-8",
+  "gap-2",
+  "gap-4",
+  "gap-8",
+]);
 const ALIGN_VALUES = new Set<string>([...ALIGN_TOKENS]);
 const COLOR_VALUES = new Set<string>([...COLOR_TOKENS]);
-
-function SPACING_CLASS_SPACING_VALUES(): string[] {
-  return ["p-2", "p-4", "p-8", "gap-2", "gap-4", "gap-8"];
-}
 
 /** True when op/param is executable without a model (closure check mirror). */
 export function isTier1Executable(op: string | null, param: string | null): boolean {

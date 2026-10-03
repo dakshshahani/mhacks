@@ -17,6 +17,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shell
     devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

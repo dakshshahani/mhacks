@@ -1,9 +1,8 @@
-// Dev C: ALL speech plumbing behind `speech:*` (STT P0 + TTS P2).
+// Dev C: STT plumbing behind `speech:*` (team cut TTS — STT only).
 // Shell owns the mic stream; emits speech:transcript {text,isFinal} +
 // speech:state off|listening|processing. STT = Web Speech primary /
-// ElevenLabs Scribe fallback. TTS = deterministic template from EditResult.
+// ElevenLabs Scribe fallback.
 
-import type { EditResult } from "../../contracts/src/agent";
 import type { SpeechEvent, SpeechState } from "../../contracts/src/decision";
 
 export type RecognizerKind = "web-speech" | "scribe";
@@ -15,13 +14,6 @@ export interface Recognizer {
 
 /** Disclosure rule (grill-locked): mic chip shows the sponsor trial badge. */
 export const SPEECH_SPONSOR: string = "elevenlabs-trial";
-
-export function narrationFor(result: EditResult): string {
-  if (result.status !== "applied") return "Edit could not be applied.";
-  const first = result.filesChanged[0] ?? "file";
-  const base = first.split("/").pop() ?? first;
-  return `Applied edit to ${base}.`;
-}
 
 export class SpeechService {
   private state: SpeechState = "off";

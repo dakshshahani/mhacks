@@ -37,26 +37,20 @@ export async function invoke(channel, req) {
 
 // Human-readable narration of what an op does (Dev B writes status lines in
 // prod; the harness narrates locally so done-vs-undone is visible).
+const OP_TEXT = {
+  "set-color": (t, p) => `${t}: color → ${p}`,
+  "set-radius": (t, p) => `${t}: corners → ${p}`,
+  "set-spacing": (t, p) => `${t}: spacing → ${p}`,
+  "set-align": (t, p) => `${t}: align → ${p}`,
+  hide: (t) => `${t}: hidden`,
+  "swap-text": (t, p) => `${t}: text → “${p}”`,
+};
 export function describeOp(req) {
   const t = req.target.componentName || req.target.id;
   const op = req.op;
   if (!op) return `${t}: custom edit`;
-  switch (op.op) {
-    case "set-color":
-      return `${t}: color → ${op.param}`;
-    case "set-radius":
-      return `${t}: corners → ${op.param}`;
-    case "set-spacing":
-      return `${t}: spacing → ${op.param}`;
-    case "set-align":
-      return `${t}: align → ${op.param}`;
-    case "hide":
-      return `${t}: hidden`;
-    case "swap-text":
-      return `${t}: text → “${op.param}”`;
-    default:
-      return `${t}: edit`;
-  }
+  const fmt = OP_TEXT[op.op];
+  return fmt ? fmt(t, op.param) : `${t}: edit`;
 }
 // Target c0 -> demo/Hero.tsx. Replace with live Jev output at G2/G3.
 export function demoEditRequest(op = { op: "set-color", param: "brand" }) {

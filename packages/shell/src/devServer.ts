@@ -100,14 +100,12 @@ export class DevServerManager {
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.proc = child;
-    child.stdout?.on("data", (d: Buffer) => {
+    const onOutput = (d: Buffer): void => {
       this.logs.push(String(d));
       if (this.logs.length > 500) this.logs.splice(0, this.logs.length - 500);
-    });
-    child.stderr?.on("data", (d: Buffer) => {
-      this.logs.push(String(d));
-      if (this.logs.length > 500) this.logs.splice(0, this.logs.length - 500);
-    });
+    };
+    child.stdout?.on("data", onOutput);
+    child.stderr?.on("data", onOutput);
     return this.port;
   }
 

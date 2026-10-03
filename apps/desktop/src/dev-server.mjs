@@ -15,6 +15,12 @@ import { FileGitService } from "../../../packages/shell/src/git.ts";
 import { PreviewHost } from "../../../packages/shell/src/preview.ts";
 import { SpeechService } from "../../../packages/shell/src/speech.ts";
 import { IpcRouter } from "../../../packages/shell/src/ipcRouter.ts";
+import {
+  COLOR_CLASS,
+  RADIUS_CLASS,
+  SPACING_CLASS,
+  ALIGN_CLASS,
+} from "../../../packages/shell/src/tier1.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..");
@@ -68,17 +74,33 @@ const MIME = {
 };
 
 // Token styles so Tier-1 ops are VISUALLY distinguishable in the preview.
-// Mirrors the renderer maps in packages/shell/src/tier1.ts.
+// Class names are single-sourced from the renderer maps above; only the demo
+// paint bodies live here (demo-visual, not product logic).
+const DEMO_BODY = {
+  "bg-brand": "background:#2563eb;color:#fff",
+  "bg-muted": "background:#e5e7eb;color:#111",
+  "bg-accent": "background:#f59e0b;color:#111",
+  "rounded-sm": "border-radius:4px",
+  "rounded-md": "border-radius:8px",
+  "rounded-lg": "border-radius:16px",
+  "rounded-full": "border-radius:999px",
+  "p-2": "padding:8px",
+  "p-4": "padding:16px",
+  "p-8": "padding:32px",
+  "gap-2": "gap:8px",
+  "gap-4": "gap:16px",
+  "gap-8": "gap:32px",
+  "text-left": "text-align:left",
+  "text-center": "text-align:center",
+  "text-right": "text-align:right",
+  "text-justify": "text-align:justify",
+};
 const TOKEN_CSS = [
-  ".bg-brand{background:#2563eb;color:#fff}",
-  ".bg-muted{background:#e5e7eb;color:#111}",
-  ".bg-accent{background:#f59e0b;color:#111}",
-  ".rounded-sm{border-radius:4px}.rounded-md{border-radius:8px}",
-  ".rounded-lg{border-radius:16px}.rounded-full{border-radius:999px}",
-  ".p-2{padding:8px}.p-4{padding:16px}.p-8{padding:32px}",
-  ".gap-2{gap:8px}.gap-4{gap:16px}.gap-8{gap:32px}",
-  ".text-left{text-align:left}.text-center{text-align:center}",
-  ".text-right{text-align:right}.text-justify{text-align:justify}",
+  ...Object.values(COLOR_CLASS),
+  ...Object.values(RADIUS_CLASS),
+  ...Object.values(SPACING_CLASS).flatMap((c) => c.split(" ")),
+  ...Object.values(ALIGN_CLASS),
+].map((cls) => `.${cls}{${DEMO_BODY[cls] ?? ""}}`).join("\n") + [
   ".text-2xl{font-size:1.5rem;font-weight:700}",
   ".hero{border:2px dashed #999;margin:8px}",
   ".hidden{display:none}",

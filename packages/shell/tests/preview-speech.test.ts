@@ -1,8 +1,8 @@
-// Preview + speech + TTS + BYOK: envelopes, state machine, narration.
+// Preview + speech + BYOK: envelopes, state machine, sponsor badge.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PreviewHost, GAZE_OVERLAY_ATTR } from "../src/preview";
-import { SpeechService, narrationFor, SPEECH_SPONSOR } from "../src/speech";
+import { SpeechService, SPEECH_SPONSOR } from "../src/speech";
 import { createMemoryKeyStore } from "../src/safeStorage";
 import type { GazeFrame } from "../../contracts/src/gaze";
 
@@ -85,10 +85,8 @@ describe("speech service", () => {
     assert.equal(dead.start().ok, false);
   });
 
-  it("TTS narration is a deterministic template; sponsor badge disclosed", () => {
+  it("sponsor badge disclosed on mic chip", () => {
     assert.equal(SPEECH_SPONSOR, "elevenlabs-trial");
-    assert.match(narrationFor({ id: "e1", status: "applied", filesChanged: ["Hero.tsx"], commitSha: "a", durationMs: 1, hotReloaded: true }), /Hero\.tsx/);
-    assert.match(narrationFor({ id: "e1", status: "build-failed", filesChanged: [], commitSha: "", durationMs: 1, hotReloaded: false }), /could not be applied/);
   });
 });
 
