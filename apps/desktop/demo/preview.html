@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>demo preview</title></head>
+<body style="font-family: system-ui; padding: 24px;">
+  <div class="hero bg-muted p-4" data-source="Hero.tsx:1">
+    <h1 class="text-2xl" data-source="Hero.tsx:2">Hello demo</h1>
+    <p class="sub" data-source="Hero.tsx:3">Look at me, then speak.</p>
+    <button class="rounded-md bg-muted" data-source="Hero.tsx:4">Go</button>
+  </div>
+  <script>
+    // Click-to-override fallback (Dev A): click posts the point to the harness.
+    document.addEventListener("click", (e) => {
+      parent.postMessage({ type: "preview-click", x: e.clientX, y: e.clientY }, "*");
+    });
+  </script>
+</body>
+</html>

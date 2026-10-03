@@ -4,3 +4,4 @@ export * from "./gaze";
 export * from "./agent";
 export * from "./decision";
 export * from "./ipc";
+export * from "./mocks/index";

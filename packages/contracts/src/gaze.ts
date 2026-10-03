@@ -22,6 +22,15 @@ export interface ElementCandidate {
   trackedConfidence: number;
   /** Ops we can Tier-1 patch on this element, declared by the prober. */
   supportedOps: EditOp[];
+  /** Optional target crop for the code model (base64 PNG, small — the prober
+   *  captures the element region, not the screen). Null until Dev A supplies
+   *  it; JSON-safe across webview/IPC. The Flash-Lite fallback input carries
+   *  transcript + target (incl. this crop) + projectContext. */
+  screenshotCrop?: string | null;
+  /** 1-based line of the element's data-source="file:line" attr, when the
+   *  prober could map it (template repo). Lets the Tier-1 renderer scope a
+   *  class/text edit to the target's own line in multi-element files. */
+  sourceLine?: number | null;
 }
 
 export interface GazeFrame {

@@ -26,7 +26,7 @@ You decide **how** an edit lands. You never decide **what** the edit is
 | Edit executor: apply in worktree, build/lint gate, pre-commit | Gaze probing logic (Dev A — you just host the webview it runs in) |
 | **Tier-1 patch renderer** (`EditOp` → deterministic edit, executor-side) | Token catalog vocabulary (Dev B defines; you implement exhaustively) |
 | Dev-server manager: spawn/restart/HMR detection | Business logic behind states |
-| Speech plumbing STT (P0) + TTS (P2) behind same `speech:*` channels | Transcript interpretation (Dev B) |
+| Speech plumbing (STT-only; TTS cut) behind `speech:*` channels | Transcript interpretation (Dev B) |
 | `safeStorage` BYOK wrapper (~20 lines, after G3, only if time) | Pricing/billing (mocked; PM owns UI) |
 | Electron wrap — LAST, only after G3 | — |
 
@@ -41,8 +41,8 @@ You decide **how** an edit lands. You never decide **what** the edit is
    window (Dev B's `riskScore`), never gates a dialog. `git:confirm` survives
    only as the power-path commit on the pre-commit sha.
 3. **Speech engine: ElevenLabs sponsor for the demo** (PRD "no sponsor" header
-   is void). STT = Web Speech primary / ElevenLabs Scribe fallback (P0);
-   TTS = agent narration (P2, F14) behind the same `speech:*` channels.
+   is void). STT = Web Speech primary / ElevenLabs Scribe fallback (P0).
+   TTS cut by team decision (was P2) — STT only.
    Mic chip must show the sponsor badge (disclosure rule — PM renders it,
    you emit the state that drives it).
 4. **Tier-1 patch renderer is YOURS** (reassigned from Dev B in the final
@@ -147,6 +147,30 @@ unblock PM/Dev A.
 - G3 definition of done: real 3.5 Flash-Lite edit through Dev B's agent → real commit
   → undo works. The one-line mock→real swap is yours.
 
+### 5.4b Executor-context rule (locked with Dev B)
+
+An edit needs three views: **target** (what changes), **parent** (what
+constrains it — centering needs the container, widths need the sibling),
+**references** (what it relates to). Without the parent, the applier guesses
+layout blind — that class of bug already bit us in testing.
+
+Split by seam (addresses over the wire, content at apply time):
+
+- `EditRequest` carries the target in full + the parent as an **address only**
+  (`componentName` + `filePath`, one level, no HTML) + named `references`.
+  Payloads stay small and JSON-safe per §4.
+- Your executor resolves the address itself at apply time via the
+  `data-source` map: read the parent component's file section, check layout
+  context (flex/grid, alignment, inherited styles), then apply. You own the
+  filesystem — you do the reading; Dev B never ships file contents over IPC.
+  (Implemented as enclosing-context derivation from the target file text the
+  executor already reads — data-source marker window, else file head, capped
+  2KB. No extra I/O, nothing extra on the wire. Cross-file parents ride
+  Dev B's `references[]`.)
+- Tier-1 renderer needs only target + tokens (class swaps are local); the
+  parent matters for `small`/`large` diffs — read it before applying, include
+  it when calling the model for retry context.
+
 ### 5.5 Tier-1 patch renderer — the sub-2s path (~2h, pure code)
 
 - Input: `EditOp` union (Dev B's vocabulary) + `ElementCandidate.filePath`.
@@ -158,6 +182,7 @@ unblock PM/Dev A.
 set-color {brand,muted,accent} → className += token class (must match PM tokens exactly)
 set-radius {sm,md,lg,full}     → rounded-* class swap
 set-spacing {tight,normal,loose} → padding/gap class swap
+set-align {left,center,right,justify} → text-align swap (added grill-follow-up: basic verb, Jev-confirmed)
 hide                        → hidden class / display:none
 swap-text {string}          → textContent replace from transcript span
 ```
@@ -166,7 +191,7 @@ swap-text {string}          → textContent replace from transcript span
   covers it). Budget ~1s file-write→HMR. This carries 70–80% of the scripted demo.
 - `COLOR_TOKENS` frozen hour 3 from PM — your renderer must match them exactly.
 
-### 5.6 Speech plumbing — ALL speech is yours (STT P0 + TTS P2)
+### 5.6 Speech plumbing — STT only (TTS cut by team decision)
 
 - Behind the same `speech:*` channels. Shell owns the mic stream; emits
   `speech:transcript {text, isFinal}` + `speech:state` events.
@@ -174,10 +199,8 @@ swap-text {string}          → textContent replace from transcript span
   fallback. States Off/Listening/Processing always visible (PM renders; you
   emit). `speech:start` on hotkey-toggle → `listening` (this is also Dev A's
   lock-on signal) → final token → `processing` → Dev B pipeline.
-- **TTS (P2, F14):** agent narration. Deterministic template sentence from
-  `EditResult` (e.g. `"Applied hero color."`), drop-cut is an `<audio>`
-  element. **Must be tested by G4 or it doesn't ship.** First cut if the core
-  loop slips.
+- **TTS: CUT.** Agent narration removed (was P2) — STT command capture only.
+  The mic-chip sponsor badge stays (ElevenLabs Scribe is the STT fallback).
 - Transcript shown/editable before apply (misrecognition mitigation — PM UI,
   your events).
 
@@ -198,7 +221,7 @@ swap-text {string}          → textContent replace from transcript span
 | 5–8 | Git service as standalone module, tested by script (snapshot/undo/history on template); executor skeleton accepting `EditRequest`. Real gaze + real speech → mock edit (G2 ~h8). | `git:undo` reverts a scripted edit; mock edit lands in real DOM |
 | 8–10 (G3) | Real edit lands: Dev B's real agent → your executor → real commit → undo works. Two small swaps (agent ~h9, Jev ~h11). | One-line mock→real swap; your DoD |
 | 10–14 | Tier-1 renderer + HMR truth + STT fallback hardened; sub-2s measured on catalog edits. | 70–80% of demo script on `no-llm` path |
-| 14–17 (G4) | Failure paths exercised: build-failed envelope, undo inside window, webview not-ready, TTS tested or cut. | Full real pipeline incl. undo circle + mocked tiers |
+| 14–17 (G4) | Failure paths exercised: build-failed envelope, undo inside window, webview not-ready. | Full real pipeline incl. undo circle + mocked tiers |
 | 17–21 (G5) | Freeze + outsider test support; Electron only if G3 passed. | Unassisted look→speak→change→undo |
 
 Gate rule: feature missing its gate drops to P1 immediately. Order of cuts:

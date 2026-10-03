@@ -1,0 +1,19 @@
+{
+  "name": "@mhacks/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "dev": "node --experimental-strip-types --env-file=../../.env --import ../../packages/shell/dev-register.mjs --import ../../packages/orchestrator/dev-register.mjs ./src/dev-server.mjs"
+  },
+  "dependencies": {
+    "@mhacks/contracts": "workspace:*",
+    "@mhacks/orchestrator": "workspace:*",
+    "@mhacks/shell": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.7.0"
+  }
+}

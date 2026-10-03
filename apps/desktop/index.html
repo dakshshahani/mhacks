@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mhacks desktop harness</title>
+  <style>
+    body { margin: 0; background: #0b0e14; color: #e6e9f0; font-family: system-ui, sans-serif; }
+    #bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
+    #mic { border: 1px solid #333; border-radius: 999px; padding: 4px 10px; }
+    #mic-toggle { cursor: pointer; border-radius: 999px; padding: 4px 12px; }
+    #mic-toggle[aria-pressed="true"] { border-color: #f87171; }
+    #transcript { flex: 1; min-width: 200px; background: #141a26; color: #e6e9f0; border: 1px solid #333; border-radius: 6px; padding: 4px 8px; }
+    #preview { width: 100%; height: calc(100vh - 190px); border: 0; background: white; }
+    #undo { position: fixed; right: 24px; bottom: 24px; width: 72px; height: 72px;
+      border-radius: 50%; border: 2px solid #7dd3fc; display: none;
+      align-items: center; justify-content: center; background: rgba(125,211,252,.12); cursor: pointer; }
+    #fail { display: none; margin: 0 12px 8px; padding: 8px 12px; border: 1px solid #f87171; border-radius: 8px;
+      background: rgba(248,113,113,.1); }
+    #history { margin: 0 12px 8px; padding: 0; list-style: none; font-size: 12px; color: #9aa3b2; max-height: 64px; overflow: auto; }
+    #history li { padding: 1px 0; }
+    #point { font-size: 12px; color: #9aa3b2; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <span id="mic" data-testid="mic-chip">mic off · elevenlabs-trial</span>
+    <button id="mic-toggle" type="button" aria-pressed="false" aria-label="toggle microphone">🎙 Mic on</button>
+    <input id="transcript" type="text" value="make it brand" aria-label="command transcript" />
+    <button id="send" type="button">send edit</button>
+    <span id="point" data-testid="gaze-point">no point selected (click preview)</span>
+    <span id="status" data-testid="status-line">idle</span>
+    <button id="new-version" type="button">new version</button>
+  </div>
+  <div id="fail" data-testid="fail-card" role="alert"></div>
+  <ol id="history" data-testid="version-history"></ol>
+  <!-- Browser harness preview (G1-G2). Electron <webview> replaces this later. -->
+  <iframe id="preview" title="preview" src="/demo/preview.html"></iframe>
+  <!-- Undo circle: risk-widened window from the server, click reverts (PM renders). -->
+  <div id="undo" data-testid="undo-circle">undo</div>
+  <script type="module" src="./src/renderer.js"></script>
+</body>
+</html>

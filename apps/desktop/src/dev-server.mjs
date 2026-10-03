@@ -1,0 +1,473 @@
+// Browser-harness server (G2-G3).
+// REAL: HTTP, FileGitService, executor + Tier-1, PreviewHost, SpeechService,
+// Dev B pipeline (Jev or mockJev -> composeEditRequest -> agent:submitEdit),
+// Flash-Lite narrow diffs, template build gate, file-watch HMR truth.
+// STUBBED at the boundary (injectable, Dev A seam): the gaze probe (canned
+// single-candidate GazeFrame until the WebGazer client lands) and the
+// recognizer (in-memory stub; the transcript box is the recognizer).
+// MOCK_JEV=1 forces mockJev; otherwise createJevLayer() uses the live key
+// and falls back to mockJev on timeout/outage. mockAgent is NOT used — the
+// executor always applies for real so commitSha/undo stay truthful.
+
+import { createServer } from "node:http";
+import { readFile, readdir } from "node:fs/promises";
+import { join, extname, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { FileGitService } from "@mhacks/shell";
+import { PreviewHost } from "@mhacks/shell";
+import { SpeechService } from "@mhacks/shell";
+import { IpcRouter } from "@mhacks/shell";
+import { DevServerManager } from "@mhacks/shell";
+import { mockJev } from "@mhacks/contracts";
+import {
+  PipelineMachine,
+  createJevLayer,
+  generateNarrowDiff,
+  verifyDecision,
+} from "@mhacks/orchestrator";
+import { decideAndEdit } from "./decide.ts";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const appRoot = join(here, "..");
+const demoRoot = join(appRoot, "demo");
+const port = Number(process.env.PORT ?? 5173);
+
+const git = new FileGitService(demoRoot);
+const preview = new PreviewHost();
+// Harness stub probe — Dev A seam: replace with the WebGazer queryElementAt
+// when it lands. Shape stays GazeFrame either way. Emulates a real prober:
+// one candidate per template block element in DOM order (never shuffled),
+// each with its data-source line, plus lockedTarget = deepest element under
+// the point (mirrors elementsFromPoint hit-testing). Geometry is approximate
+// stub data, good enough for click-to-override until the tracker supplies it.
+preview.setProbe(
+  (x, y) => {
+    const candidates = [
+      {
+        id: "c0",
+        selector: "div.hero",
+        componentName: "Hero",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 24, y: 24, width: 600, height: 200 },
+        outerHTMLSnippet: '<div class="hero">…</div>',
+        htmlTruncated: true,
+        confidence: 0.9,
+        trackedConfidence: 0.95,
+        supportedOps: [{ op: "set-color", param: "brand" }],
+        sourceLine: 1,
+      },
+      {
+        id: "c1",
+        selector: "h1",
+        componentName: "HeroTitle",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 40, y: 40, width: 300, height: 40 },
+        outerHTMLSnippet: "<h1>Hello demo</h1>",
+        htmlTruncated: false,
+        confidence: 0.85,
+        trackedConfidence: 0.9,
+        supportedOps: [
+          { op: "set-color", param: "brand" },
+          { op: "swap-text", param: "Hello demo" },
+        ],
+        sourceLine: 2,
+      },
+      {
+        id: "c2",
+        selector: "p.sub",
+        componentName: "HeroSub",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 40, y: 90, width: 300, height: 24 },
+        outerHTMLSnippet: "<p>Look at me, then speak.</p>",
+        htmlTruncated: false,
+        confidence: 0.85,
+        trackedConfidence: 0.9,
+        supportedOps: [
+          { op: "set-color", param: "brand" },
+          { op: "swap-text", param: "Look at me, then speak." },
+        ],
+        sourceLine: 3,
+      },
+      {
+        id: "c3",
+        selector: "button",
+        componentName: "GoButton",
+        filePath: "Hero.tsx",
+        boundingRect: { x: 40, y: 124, width: 80, height: 36 },
+        outerHTMLSnippet: "<button>Go</button>",
+        htmlTruncated: false,
+        confidence: 0.85,
+        trackedConfidence: 0.9,
+        supportedOps: [
+          { op: "set-color", param: "brand" },
+          { op: "set-radius", param: "full" },
+          { op: "swap-text", param: "Go" },
+        ],
+        sourceLine: 4,
+      },
+    ];
+    // Deepest containing candidate wins (DOM order = shallowest first).
+    let lockedTarget = null;
+    for (const c of candidates) {
+      const r = c.boundingRect;
+      if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
+        lockedTarget = c;
+      }
+    }
+    return Promise.resolve({
+      candidates,
+      lockedTarget,
+      capturedAt: Date.now(),
+    });
+  },
+  true,
+);
+const speech = new SpeechService([{ kind: "web-speech", isAvailable: () => true }]);
+const pipeline = new PipelineMachine();
+
+// HMR truth: watch the demo tree; executor flips hotReloaded only when the
+// watcher actually observes the write (never optimistic).
+const devServer = new DevServerManager();
+await devServer.watch(demoRoot).catch((err) => {
+  console.warn(`[harness] file watch unavailable, hotReloaded always false: ${String(err)}`);
+});
+
+/** Template-scoped build gate. The demo tree has no compiler; this checks
+ *  what a bad edit observably breaks: empty files, unbalanced delimiters,
+ *  dropped data-source mapping, and model output in the wrong shape (a
+ *  unified diff or fenced block instead of file content). Lenient by design
+ *  — Tier-1 class/text edits always pass; a suspicious LLM diff fails safe
+ *  into the fail card. */
+function templateBuildGate() {
+  return {
+    check: async (filesChanged) => {
+      for (const rel of filesChanged) {
+        const text = await readFile(join(demoRoot, rel), "utf8").catch(() => null);
+        if (text === null) return { ok: false, message: `gate: cannot read ${rel}` };
+        if (text.trim().length === 0) return { ok: false, message: `gate: ${rel} is empty` };
+        if (/^```/m.test(text) || /^(@@|--- |\+\+\+ |diff --git )/m.test(text)) {
+          return { ok: false, message: `gate: ${rel} looks like a diff, not file content` };
+        }
+        for (const [open, close] of [["{", "}"], ["(", ")"], ["[", "]"]]) {
+          const opens = text.split(open).length;
+          const closes = text.split(close).length;
+          if (opens !== closes) {
+            return { ok: false, message: `gate: ${rel} unbalanced ${open}${close}` };
+          }
+        }
+        if (!text.includes("data-source=")) {
+          return { ok: false, message: `gate: ${rel} lost data-source mapping` };
+        }
+      }
+      return { ok: true };
+    },
+  };
+}
+
+// Template scope for the Flash-Lite fallback (instruction-locked): filePath
+// arrives via Dev A's data-source attr — no wide codebase search, the model
+// works only within these files.
+const demoFiles = await readdir(demoRoot)
+  .then((fs) => fs.filter((f) => !f.startsWith(".")).join(", "))
+  .catch(() => "Hero.tsx");
+const projectContext =
+  "React JSX template with Tailwind-style utilities; preview CSS defines only " +
+  "bg-brand/bg-muted/bg-accent, rounded-sm/md/lg/full, p-2/4/8, gap-2/4/8, " +
+  "text-left/center/right/justify. " +
+  `Template files: ${demoFiles}. Work only within these files.`;
+
+const router = new IpcRouter({
+  git,
+  preview,
+  speech,
+  executorDeps: {
+    readFile: (p) => readFile(p, "utf8"),
+    writeFile: async (p, t) => {
+      const { writeFile: wf } = await import("node:fs/promises");
+      await wf(p, t, "utf8");
+    },
+    resolveRoot: (f) => (f ? join(demoRoot, f) : demoRoot),
+    // §5.4b: address on the wire, content resolved here at apply time.
+    readParentSection: async (address) => {
+      if (!address.filePath) return null;
+      const text = await readFile(join(demoRoot, address.filePath), "utf8").catch(() => null);
+      return text === null ? null : text.slice(0, 2000);
+    },
+    // small/large routes: Flash-Lite full-file rewrite. Null without a key (or
+    // on outage) — the executor then falls back to the Tier-1 hint or fails
+    // the envelope honestly; never a silent no-op. attempt/lastError feed the
+    // error-fed retry context the grill locked in.
+    generateDiff: (req, ctx) =>
+      generateNarrowDiff(req, {
+        currentText: ctx.currentText,
+        parentSection: ctx.parentSection,
+        projectContext,
+        lastError: ctx.lastError,
+        attempt: ctx.attempt,
+      }),
+    buildGate: templateBuildGate(),
+    didReload: () => devServer.waitForReload(2000),
+  },
+});
+
+const useMockJev = process.env.MOCK_JEV === "1";
+const jevLayer = useMockJev ? mockJev : createJevLayer();
+
+// speech:start doubles as the pipeline entry + Dev A lock-on signal.
+// Symmetrically, dropping to off while merely listening (mute/stop with no
+// edit in flight) releases the pipeline back to idle — otherwise the next
+// send would 409 against a stale listening stage. An in-flight decide
+// re-enters listening itself after its probe, so this reset can't strand one.
+speech.onState((s) => {
+  if (s === "listening") pipeline.startListening();
+  if (s === "off" && pipeline.getState().stage === "listening") pipeline.reset();
+  broadcast({ type: "speech-state", state: s });
+});
+speech.onTranscript((event) => broadcast({ type: "speech-transcript", event }));
+pipeline.subscribe((state) => broadcast({ type: "pipeline", state }));
+
+const MIME = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".tsx": "text/plain",
+  ".json": "application/json",
+};
+
+// Token styles so Tier-1 ops are VISUALLY distinguishable in the preview.
+// Mirrors the renderer maps in packages/shell/src/tier1.ts.
+const TOKEN_CSS = [
+  ".bg-brand{background:#2563eb;color:#fff}",
+  ".bg-muted{background:#e5e7eb;color:#111}",
+  ".bg-accent{background:#f59e0b;color:#111}",
+  ".rounded-sm{border-radius:4px}.rounded-md{border-radius:8px}",
+  ".rounded-lg{border-radius:16px}.rounded-full{border-radius:999px}",
+  ".p-2{padding:8px}.p-4{padding:16px}.p-8{padding:32px}",
+  ".gap-2{gap:8px}.gap-4{gap:16px}.gap-8{gap:32px}",
+  ".text-left{text-align:left}.text-center{text-align:center}",
+  ".text-right{text-align:right}.text-justify{text-align:justify}",
+  ".text-2xl{font-size:1.5rem;font-weight:700}",
+  ".hero{border:2px dashed #999;margin:8px}",
+  ".hidden{display:none}",
+].join("\n");
+
+async function renderPreview() {
+  const hero = await readFile(join(demoRoot, "Hero.tsx"), "utf8")
+    .then((t) => t.replace(/className=/g, "class=")) // JSX -> HTML
+    .catch(() => "<!-- Hero.tsx missing -->");
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>demo preview</title><style>${TOKEN_CSS}</style></head>
+<body style="font-family: system-ui; padding: 24px;">
+  ${hero}
+  <script>
+    document.addEventListener("click", (e) => {
+      parent.postMessage({ type: "preview-click", x: e.clientX, y: e.clientY }, "*");
+    });
+  </script>
+</body>
+</html>`;
+}
+
+const sseClients = new Set();
+function broadcast(event) {
+  const line = `data: ${JSON.stringify(event)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(line);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      try {
+        resolve(body.length > 0 ? JSON.parse(body) : {});
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res, status, value) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(value));
+}
+
+async function handleDecideAndEdit(body, res) {
+  const transcript = typeof body.transcript === "string" ? body.transcript : "";
+  const x = Number(body.x);
+  const y = Number(body.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    sendJson(res, 400, { ok: false, code: "unknown", message: "x/y must be numbers" });
+    return;
+  }
+  // Transport-owned mutual exclusion (decide.ts only refuses mid-edit
+  // stages). Checked and claimed synchronously — no await between, so two
+  // racing sends can't both enter.
+  const st = pipeline.getState().stage;
+  if (
+    decideActive > 0 ||
+    st === "locked" ||
+    st === "editing" ||
+    st === "verifying"
+  ) {
+    sendJson(res, 409, {
+      ok: false,
+      code: "unknown",
+      message: `pipeline is ${decideActive > 0 ? "busy" : st}; wait for applied/failed`,
+    });
+    return;
+  }
+  decideActive += 1;
+  const t0 = Date.now();
+  let outcome;
+  try {
+    outcome = await decideAndEdit(transcript, x, y, {
+    decide: jevLayer,
+    submitEdit: (req) => router.invoke("agent:submitEdit", req),
+    verify: (t, diffSummary) => verifyDecision({ transcript: t, diffSummary }),
+    pipeline,
+    speech,
+    queryFrame: async (qx, qy) => {
+      const frame = await router.invoke("preview:queryElementAt", { x: qx, y: qy });
+      if (!frame.ok) {
+        const err = new Error(`preview: ${frame.message}`);
+        err.code = frame.code === "not-ready" ? 503 : 502;
+        throw err;
+      }
+      return frame.value;
+    },
+  });
+  switch (outcome.kind) {
+    case "applied": {
+      const d = outcome.decision;
+      console.log(
+        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)}`,
+      );
+      sendJson(res, 200, {
+        ok: true,
+        decision: outcome.decision,
+        editRequest: outcome.editRequest,
+        editResult: outcome.editResult,
+        undoWindowMs: outcome.undoWindowMs,
+        verified: outcome.verified,
+      });
+      return;
+    }
+    case "dropped":
+      sendJson(res, 200, { ok: true, dropped: true, decision: outcome.decision });
+      return;
+    case "busy":
+      // Unreachable while the transport counter above holds (kept for the
+      // direct-call shape): release the claim anyway via finally below.
+      sendJson(res, 409, { ok: false, code: "unknown", message: outcome.message });
+      return;
+    case "error":
+      console.log(`[pipeline] error after ${Date.now() - t0}ms: ${outcome.message}`);
+      sendJson(res, 422, { ok: false, code: "build-failed", message: outcome.message });
+      return;
+  }
+  } finally {
+    decideActive -= 1;
+  }
+}
+
+// In-flight decide count. Checked + claimed with no await between, so it is
+// the atomic mutual-exclusion signal; pipeline stages alone can't serve
+// because `listening` also means merely speech-armed.
+let decideActive = 0;
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  if (req.method === "GET" && url.pathname === "/api/events") {
+    // Reconcile before replaying: `processing` is only legal alongside a
+    // live decide (counter > 0 or a mid-edit stage). Anything else is an
+    // orphaned utterance (failed send, reload mid-flow) — release it so a
+    // fresh subscribe never restores a stuck chip.
+    if (
+      speech.currentState === "processing" &&
+      decideActive === 0 &&
+      !["locked", "editing", "verifying"].includes(pipeline.getState().stage)
+    ) {
+      speech.resetToIdle();
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    sseClients.add(res);
+    res.write(`data: ${JSON.stringify({ type: "pipeline", state: pipeline.getState() })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "speech-state", state: speech.currentState })}\n\n`);
+    req.on("close", () => {
+      sseClients.delete(res);
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/decide-and-edit") {
+    try {
+      const body = await readJson(req);
+      await handleDecideAndEdit(body, res);
+    } catch (err) {
+      const status = err && typeof err.code === "number" ? err.code : 500;
+      sendJson(res, status, {
+        ok: false,
+        code: status === 503 ? "not-ready" : "unknown",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/transcript") {
+    try {
+      const body = await readJson(req);
+      const text = typeof body.text === "string" ? body.text : "";
+      speech.pushTranscript(text, body.isFinal !== false);
+      sendJson(res, 200, { ok: true, value: { state: speech.currentState } });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, code: "unknown", message: String(err) });
+    }
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/invoke") {
+    try {
+      const { channel, req: payload } = await readJson(req);
+      const out = await router.invoke(channel, payload);
+      sendJson(res, 200, out);
+    } catch (err) {
+      sendJson(res, 200, { ok: false, code: "unknown", message: String(err) });
+    }
+    return;
+  }
+  const path = url.pathname === "/" ? "/index.html" : url.pathname;
+  // Live preview: rendered from the CURRENT Hero.tsx on every load, so
+  // executor edits are visible in the iframe after reload.
+  if (path === "/demo/preview.html") {
+    const html = await renderPreview();
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(html);
+    return;
+  }
+  try {
+    const data = await readFile(join(appRoot, path));
+    res.writeHead(200, { "Content-Type": MIME[extname(path)] ?? "application/octet-stream" });
+    res.end(data);
+  } catch {
+    res.writeHead(404);
+    res.end("not found");
+  }
+});
+
+server.listen(port, () => {
+  console.log(`desktop harness on http://localhost:${port} (demo root: ${demoRoot})`);
+  console.log(`[harness] jev: ${useMockJev ? "mockJev (MOCK_JEV=1)" : "live layer w/ mockJev fallback"}`);
+});

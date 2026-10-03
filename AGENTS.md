@@ -129,8 +129,10 @@ into it, never mutate it.
 
 `POLICY` in `contracts/src/decision.ts` is the single source of truth for
 thresholds (`AUTOMATION_MIN`, `ACTIONABLE_MIN`, `RETRY_THRESHOLD`,
-`APPLY_THRESHOLD`…). Tuning these requires a PR that notes the probe run
-(`npm run probe` on `jev-end`-style harness) that informed it.
+`APPLY_THRESHOLD`, `MAX_RETRIES`…). Build-gate retries cap at `MAX_RETRIES`
+(3, grill-locked: error-fed, then revert + fail card); verify retries once.
+Tuning these requires a PR that notes the probe run (`npm run probe` on
+`jev-end`-style harness) that informed it.
 
 **Git-as-buttons UI mapping:**
 
