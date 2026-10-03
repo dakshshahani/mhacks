@@ -3,8 +3,8 @@
 // speech:state off|listening|processing. STT = Web Speech primary /
 // ElevenLabs Scribe fallback. TTS = deterministic template from EditResult.
 
-import type { EditResult } from "../../contracts/src/agent";
-import type { SpeechEvent, SpeechState } from "../../contracts/src/decision";
+import type { EditResult } from "@mhacks/contracts";
+import type { SpeechEvent, SpeechState } from "@mhacks/contracts";
 
 export type RecognizerKind = "web-speech" | "scribe";
 

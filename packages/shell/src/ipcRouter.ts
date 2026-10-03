@@ -2,9 +2,9 @@
 // Every invoke returns an IpcResult envelope; never throws across IPC.
 // Events (pipeline:state, speech:*) are transported, never mutated here.
 
-import type { CalibrationStatus } from "../../contracts/src/gaze";
-import type { EditRequest } from "../../contracts/src/agent";
-import type { IpcChannelMap, IpcResult } from "../../contracts/src/ipc";
+import type { CalibrationStatus } from "@mhacks/contracts";
+import type { EditRequest } from "@mhacks/contracts";
+import type { IpcChannelMap, IpcResult } from "@mhacks/contracts";
 import type { FileGitService } from "./git";
 import { submitEdit, type ExecutorDeps } from "./executor";
 import type { PreviewHost } from "./preview";

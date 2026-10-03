@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@mhacks/contracts": "workspace:*",
+    "@mhacks/orchestrator": "workspace:*",
     "@mhacks/shell": "workspace:*"
   },
   "devDependencies": {

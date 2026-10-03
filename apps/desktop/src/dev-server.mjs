@@ -1,20 +1,31 @@
-// Thin static server for the browser harness (G1-G2).
-// REAL: HTTP, FileGitService, executor, Tier-1, PreviewHost, SpeechService,
-// all running in Node against apps/desktop/demo.
-// STUBBED (boundary, injectable): gaze probe (canned GazeFrame), recognizers
-// (in-memory), diff generator (Tier-1 only), build gate (pass-through).
-// Dev B's orchestrator (real Jev + Flash-Lite, or mockJev/mockAgent) talks to
-// the same IpcRouter via POST /api/invoke — swap the canned frame for
-// Decision -> composeEditRequest output at G2/G3 with no shell changes.
+// Browser-harness server (G2-G3).
+// REAL: HTTP, FileGitService, executor + Tier-1, PreviewHost, SpeechService,
+// Dev B pipeline (Jev or mockJev -> composeEditRequest -> agent:submitEdit),
+// Flash-Lite narrow diffs, template build gate, file-watch HMR truth.
+// STUBBED at the boundary (injectable, Dev A seam): the gaze probe (canned
+// single-candidate GazeFrame until the WebGazer client lands) and the
+// recognizer (in-memory stub; the transcript box is the recognizer).
+// MOCK_JEV=1 forces mockJev; otherwise createJevLayer() uses the live key
+// and falls back to mockJev on timeout/outage. mockAgent is NOT used — the
+// executor always applies for real so commitSha/undo stay truthful.
 
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FileGitService } from "../../../packages/shell/src/git.ts";
-import { PreviewHost } from "../../../packages/shell/src/preview.ts";
-import { SpeechService } from "../../../packages/shell/src/speech.ts";
-import { IpcRouter } from "../../../packages/shell/src/ipcRouter.ts";
+import { FileGitService } from "@mhacks/shell";
+import { PreviewHost } from "@mhacks/shell";
+import { SpeechService } from "@mhacks/shell";
+import { IpcRouter } from "@mhacks/shell";
+import { DevServerManager } from "@mhacks/shell";
+import { mockJev } from "@mhacks/contracts";
+import {
+  PipelineMachine,
+  createJevLayer,
+  generateNarrowDiff,
+  verifyDecision,
+} from "@mhacks/orchestrator";
+import { decideAndEdit } from "./decide.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..");
@@ -23,6 +34,8 @@ const port = Number(process.env.PORT ?? 5173);
 
 const git = new FileGitService(demoRoot);
 const preview = new PreviewHost();
+// Canned probe — Dev A seam: replace setProbe arg with the WebGazer
+// queryElementAt when it lands. Shape stays GazeFrame either way.
 preview.setProbe(
   (x, y) =>
     Promise.resolve({
@@ -46,6 +59,42 @@ preview.setProbe(
   true,
 );
 const speech = new SpeechService([{ kind: "web-speech", isAvailable: () => true }]);
+const pipeline = new PipelineMachine();
+
+// HMR truth: watch the demo tree; executor flips hotReloaded only when the
+// watcher actually observes the write (never optimistic).
+const devServer = new DevServerManager();
+await devServer.watch(demoRoot).catch((err) => {
+  console.warn(`[harness] file watch unavailable, hotReloaded always false: ${String(err)}`);
+});
+
+/** Template-scoped build gate. The demo tree has no compiler; this checks
+ *  what a bad edit observably breaks: empty files, unbalanced delimiters,
+ *  dropped data-source mapping. Lenient by design — Tier-1 class/text edits
+ *  always pass; a suspicious LLM diff fails safe into the fail card. */
+function templateBuildGate() {
+  return {
+    check: async (filesChanged) => {
+      for (const rel of filesChanged) {
+        const text = await readFile(join(demoRoot, rel), "utf8").catch(() => null);
+        if (text === null) return { ok: false, message: `gate: cannot read ${rel}` };
+        if (text.trim().length === 0) return { ok: false, message: `gate: ${rel} is empty` };
+        for (const [open, close] of [["{", "}"], ["(", ")"], ["[", "]"]]) {
+          const opens = text.split(open).length;
+          const closes = text.split(close).length;
+          if (opens !== closes) {
+            return { ok: false, message: `gate: ${rel} unbalanced ${open}${close}` };
+          }
+        }
+        if (!text.includes("data-source=")) {
+          return { ok: false, message: `gate: ${rel} lost data-source mapping` };
+        }
+      }
+      return { ok: true };
+    },
+  };
+}
+
 const router = new IpcRouter({
   git,
   preview,
@@ -57,8 +106,31 @@ const router = new IpcRouter({
       await wf(p, t, "utf8");
     },
     resolveRoot: (f) => (f ? join(demoRoot, f) : demoRoot),
+    // §5.4b: address on the wire, content resolved here at apply time.
+    readParentSection: async (address) => {
+      if (!address.filePath) return null;
+      const text = await readFile(join(demoRoot, address.filePath), "utf8").catch(() => null);
+      return text === null ? null : text.slice(0, 2000);
+    },
+    // small/large routes: Flash-Lite narrow diff. Null without a key (or on
+    // outage) — the executor then falls back to the Tier-1 hint or fails
+    // the envelope honestly; never a silent no-op.
+    generateDiff: (req) => generateNarrowDiff(req),
+    buildGate: templateBuildGate(),
+    didReload: () => devServer.waitForReload(2000),
   },
 });
+
+const useMockJev = process.env.MOCK_JEV === "1";
+const jevLayer = useMockJev ? mockJev : createJevLayer();
+
+// speech:start doubles as the pipeline entry + Dev A lock-on signal.
+speech.onState((s) => {
+  if (s === "listening") pipeline.startListening();
+  broadcast({ type: "speech-state", state: s });
+});
+speech.onTranscript((event) => broadcast({ type: "speech-transcript", event }));
+pipeline.subscribe((state) => broadcast({ type: "pipeline", state }));
 
 const MIME = {
   ".html": "text/html",
@@ -102,19 +174,135 @@ async function renderPreview() {
 </html>`;
 }
 
+const sseClients = new Set();
+function broadcast(event) {
+  const line = `data: ${JSON.stringify(event)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(line);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      try {
+        resolve(body.length > 0 ? JSON.parse(body) : {});
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res, status, value) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(value));
+}
+
+async function handleDecideAndEdit(body, res) {
+  const transcript = typeof body.transcript === "string" ? body.transcript : "";
+  const x = Number(body.x);
+  const y = Number(body.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    sendJson(res, 400, { ok: false, code: "unknown", message: "x/y must be numbers" });
+    return;
+  }
+  const outcome = await decideAndEdit(transcript, x, y, {
+    decide: jevLayer,
+    submitEdit: (req) => router.invoke("agent:submitEdit", req),
+    verify: (t, diffSummary) => verifyDecision({ transcript: t, diffSummary }),
+    pipeline,
+    speech,
+    queryFrame: async (qx, qy) => {
+      const frame = await router.invoke("preview:queryElementAt", { x: qx, y: qy });
+      if (!frame.ok) {
+        const err = new Error(`preview: ${frame.message}`);
+        err.code = frame.code === "not-ready" ? 503 : 502;
+        throw err;
+      }
+      return frame.value;
+    },
+  });
+  switch (outcome.kind) {
+    case "applied":
+      sendJson(res, 200, {
+        ok: true,
+        decision: outcome.decision,
+        editRequest: outcome.editRequest,
+        editResult: outcome.editResult,
+        undoWindowMs: outcome.undoWindowMs,
+        verified: outcome.verified,
+      });
+      return;
+    case "dropped":
+      sendJson(res, 200, { ok: true, dropped: true, decision: outcome.decision });
+      return;
+    case "busy":
+      sendJson(res, 409, { ok: false, code: "unknown", message: outcome.message });
+      return;
+    case "error":
+      sendJson(res, 422, { ok: false, code: "build-failed", message: outcome.message });
+      return;
+  }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
-  if (req.method === "POST" && url.pathname === "/api/invoke") {
-    let body = "";
-    for await (const chunk of req) body += chunk;
+  if (req.method === "GET" && url.pathname === "/api/events") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    sseClients.add(res);
+    res.write(`data: ${JSON.stringify({ type: "pipeline", state: pipeline.getState() })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "speech-state", state: speech.currentState })}\n\n`);
+    req.on("close", () => {
+      sseClients.delete(res);
+    });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/decide-and-edit") {
     try {
-      const { channel, req: payload } = JSON.parse(body);
-      const out = await router.invoke(channel, payload);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(out));
+      const body = await readJson(req);
+      await handleDecideAndEdit(body, res);
     } catch (err) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, code: "unknown", message: String(err) }));
+      const status = err && typeof err.code === "number" ? err.code : 500;
+      sendJson(res, status, {
+        ok: false,
+        code: status === 503 ? "not-ready" : "unknown",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/transcript") {
+    try {
+      const body = await readJson(req);
+      const text = typeof body.text === "string" ? body.text : "";
+      speech.pushTranscript(text, body.isFinal !== false);
+      sendJson(res, 200, { ok: true, value: { state: speech.currentState } });
+    } catch (err) {
+      sendJson(res, 400, { ok: false, code: "unknown", message: String(err) });
+    }
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/invoke") {
+    try {
+      const { channel, req: payload } = await readJson(req);
+      const out = await router.invoke(channel, payload);
+      sendJson(res, 200, out);
+    } catch (err) {
+      sendJson(res, 200, { ok: false, code: "unknown", message: String(err) });
     }
     return;
   }
@@ -139,4 +327,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, () => {
   console.log(`desktop harness on http://localhost:${port} (demo root: ${demoRoot})`);
+  console.log(`[harness] jev: ${useMockJev ? "mockJev (MOCK_JEV=1)" : "live layer w/ mockJev fallback"}`);
 });

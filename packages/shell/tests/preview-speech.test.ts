@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { PreviewHost, GAZE_OVERLAY_ATTR } from "../src/preview";
 import { SpeechService, narrationFor, SPEECH_SPONSOR } from "../src/speech";
 import { createMemoryKeyStore } from "../src/safeStorage";
-import type { GazeFrame } from "../../contracts/src/gaze";
+import type { GazeFrame } from "@mhacks/contracts";
 
 const FRAME: GazeFrame = {
   candidates: [

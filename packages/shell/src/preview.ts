@@ -3,8 +3,8 @@
 // probing logic itself. Overlay hits are excluded by agreement on
 // [data-gaze-overlay] (PM + Dev A).
 
-import type { GazeFrame, QueryElementAt } from "../../contracts/src/gaze";
-import type { IpcResult } from "../../contracts/src/ipc";
+import type { GazeFrame, QueryElementAt } from "@mhacks/contracts";
+import type { IpcResult } from "@mhacks/contracts";
 
 /** Attribute PM renders overlay layers with; prober must ignore this subtree. */
 export const GAZE_OVERLAY_ATTR = "data-gaze-overlay";

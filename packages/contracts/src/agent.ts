@@ -44,10 +44,19 @@ export interface EditRequest {
   op: EditOp | null;
   route: Route;
   riskScore: number; // 0-1; auto-apply always; >= APPLY_THRESHOLD widens undo-window (grill-locked, no Confirm dialog)
+  /** Parent as address-only (dev-c.md §5.4b): one level, no HTML on the wire.
+   *  The executor resolves content at apply time via the data-source map. */
+  parent?: ParentAddress;
   /** Cross-element context: other components named in the transcript
    *  ("same width as the hero heading"). Reader of the request (LLM or
    *  executor) uses these for match/mirror/relative edits. */
   references?: ElementCandidate[];
+}
+
+/** Address-only parent pointer. Carries no file contents across IPC. */
+export interface ParentAddress {
+  componentName: string | null;
+  filePath: string | null;
 }
 
 export type EditStatus = "applied" | "build-failed" | "retry-exhausted";

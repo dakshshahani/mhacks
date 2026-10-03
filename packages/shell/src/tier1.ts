@@ -3,13 +3,13 @@
 // Vocabulary owned by Dev B (EditOp union in agent.ts); this switch must stay
 // exhaustive with that union — adding an op means updating both together.
 
-import type { EditOp } from "../../contracts/src/agent";
+import type { EditOp } from "@mhacks/contracts";
 import {
   COLOR_TOKENS,
   RADIUS_TOKENS,
   SPACING_TOKENS,
   ALIGN_TOKENS,
-} from "../../contracts/src/agent";
+} from "@mhacks/contracts";
 
 export const COLOR_CLASS: Record<string, string> = {
   brand: "bg-brand",

@@ -3,9 +3,13 @@
 // gate, pre-commits, returns a truthful EditResult. Enforces the grill-locked
 // retry cap (MAX_RETRIES=3 error-fed, then revert + fail).
 
-import { POLICY } from "../../contracts/src/decision";
-import type { EditRequest, EditResult } from "../../contracts/src/agent";
-import type { IpcResult } from "../../contracts/src/ipc";
+import { POLICY } from "@mhacks/contracts";
+import type {
+  EditRequest,
+  EditResult,
+  ParentAddress,
+} from "@mhacks/contracts";
+import type { IpcResult } from "@mhacks/contracts";
 import { applyTier1Edit } from "./tier1";
 import type { FileGitService } from "./git";
 
@@ -17,16 +21,9 @@ export const PASS_GATE: BuildGate = {
   check: () => Promise.resolve({ ok: true }),
 };
 
-export interface ParentAddress {
-  componentName: string | null;
-  filePath: string | null;
-}
-
-/** Forward-compat parent: newest dev-c.md §5.4b carries parent as address-only.
- *  Current contract has references[] but no parent field, so accept both. */
-export type EditRequestWithParent = EditRequest & {
-  parent?: ParentAddress;
-};
+/** EditRequest.parent is now a contract field (agent.ts); this alias stays
+ *  for call sites that name the extended shape explicitly. */
+export type EditRequestWithParent = EditRequest;
 
 export interface ExecutorDeps {
   git: FileGitService;

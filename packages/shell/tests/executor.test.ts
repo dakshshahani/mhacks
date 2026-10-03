@@ -5,11 +5,11 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { EditRequest } from "../../contracts/src/agent";
-import type { ElementCandidate } from "../../contracts/src/gaze";
+import type { EditRequest } from "@mhacks/contracts";
+import type { ElementCandidate } from "@mhacks/contracts";
 import { FileGitService } from "../src/git";
 import { submitEdit, shouldRetry, type EditRequestWithParent } from "../src/executor";
-import { POLICY } from "../../contracts/src/decision";
+import { POLICY } from "@mhacks/contracts";
 
 function candidate(over: Partial<ElementCandidate> = {}): ElementCandidate {
   return {

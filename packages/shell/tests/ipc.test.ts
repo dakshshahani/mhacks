@@ -8,7 +8,7 @@ import { FileGitService } from "../src/git";
 import { PreviewHost } from "../src/preview";
 import { SpeechService } from "../src/speech";
 import { IpcRouter } from "../src/ipcRouter";
-import type { GazeFrame } from "../../contracts/src/gaze";
+import type { GazeFrame } from "@mhacks/contracts";
 
 const FRAME: GazeFrame = {
   candidates: [
