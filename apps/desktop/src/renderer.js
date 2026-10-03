@@ -172,42 +172,98 @@ events.onmessage = (e) => {
     return;
   }
   if (msg.type === "pipeline") renderPipeline(msg.state);
-  else if (msg.type === "speech-state") setMic(msg.state);
-  else if (msg.type === "speech-transcript" && transcriptEl && !msg.event.isFinal) {
+  else if (msg.type === "speech-state") {
+    serverMicState = msg.state;
+    setMic(msg.state);
+    renderMicButton();
+  } else if (msg.type === "speech-transcript" && transcriptEl && !msg.event.isFinal) {
     transcriptEl.value = msg.event.text;
   }
 };
 
-document.querySelector("#toggle")?.addEventListener("click", async () => {
-  // Real toggle: listening -> stop everything; otherwise start the server
-  // stream first, then the browser recognizer when one exists.
-  if (webSpeechActive) {
-    stopWebSpeech();
+// Zoom-style mic: one button, bound to the server mic state (single source
+// of truth over SSE — never a local guess). Click to unmute, click again to
+// mute. Muting finalizes immediately (see micOff): whatever was captured so
+// far processes now instead of waiting on the recognizer.
+let serverMicState = "off";
+
+export function renderMicButton() {
+  const btn = document.querySelector("#mic-toggle");
+  if (!btn) return;
+  const live = serverMicState === "listening" || serverMicState === "processing";
+  btn.textContent = live ? "🔇 Mic off" : "🎙 Mic on";
+  btn.setAttribute("aria-pressed", live ? "true" : "false");
+}
+
+document.querySelector("#mic-toggle")?.addEventListener("click", async () => {
+  if (serverMicState === "off") {
+    const r = await invoke("speech:start", undefined);
+    if (!r.ok) {
+      setStatus(`mic: ${r.message ?? r.code}`);
+      return;
+    }
+    // Listening state arrives over SSE; no optimistic chip update.
+    startWebSpeech();
+  } else {
+    await micOff();
+  }
+});
+
+/** Mute path: stop capture, then finalize the session buffer immediately —
+ *  this is the override. The recognizer never gets to declare final; the
+ *  buffered text processes now. Empty buffer means nothing was said: just
+ *  stop, pipeline untouched. */
+export async function micOff() {
+  stopWebSpeech();
+  const text = sessionText();
+  if (!text) {
     await invoke("speech:stop", undefined);
     return;
   }
-  const r = await invoke("speech:start", undefined);
-  if (!r.ok) {
-    setStatus(`mic: ${r.message ?? r.code}`);
-    return;
-  }
-  // Listening state arrives over SSE; no optimistic chip update.
-  startWebSpeech();
-});
+  await finalizeAndSend(text);
+}
+
+/** Shared finalize-and-send: recognizer-declared finals and mic-off
+ *  overrides converge here — one code path into the pipeline. */
+export async function finalizeAndSend(text) {
+  const t = text.trim();
+  if (!t) return;
+  stopWebSpeech();
+  sessionFinal = "";
+  sessionInterim = "";
+  fetch("/api/transcript", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: t, isFinal: true }),
+  }).catch(() => undefined);
+  await sendEdit(t);
+}
 
 // STT capture (dev-c.md 5.6: Web Speech primary). The server owns the mic
 // STATE machine; the browser owns the audio. Interim tokens fill the editable
-// box (misrecognition mitigation); a final token auto-sends through the
-// pipeline. No recognizer (e.g. Firefox) -> the box + send button IS the
-// recognizer, unchanged.
+// box (misrecognition mitigation). A recognizer-declared final auto-sends —
+// but only if the mic is still on; muting first wins via micOff, which
+// finalizes the session buffer instead of waiting on the recognizer.
+// No recognizer (e.g. Firefox) -> the box + send button IS the recognizer,
+// and the mic button still toggles the server stream (mute = stop).
 let webSpeechActive = false;
 let webSpeechRec = null;
+// Session buffer: finalized segments append, latest interim replaces.
+// micOff finalizes sessionText() without recognizer involvement.
+let sessionFinal = "";
+let sessionInterim = "";
+
+export function sessionText() {
+  return `${sessionFinal} ${sessionInterim}`.trim().replace(/\s+/g, " ");
+}
 
 function webSpeechCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
 export function startWebSpeech() {
+  sessionFinal = "";
+  sessionInterim = "";
   const Ctor = webSpeechCtor();
   if (!Ctor) {
     setStatus("Listening… (type in the box, then send — no browser recognizer)");
@@ -220,23 +276,21 @@ export function startWebSpeech() {
     rec.maxAlternatives = 1;
     rec.onresult = (e) => {
       let interim = "";
-      let finalText = "";
+      let eventFinal = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
         const text = res[0]?.transcript ?? "";
-        if (res.isFinal) finalText += text;
+        if (res.isFinal) eventFinal += text;
         else interim += text;
       }
-      const showing = (finalText || interim).trim();
+      if (eventFinal) sessionFinal += eventFinal;
+      sessionInterim = interim;
+      const showing = sessionText();
       if (transcriptEl && showing) transcriptEl.value = showing;
-      if (finalText.trim()) {
-        fetch("/api/transcript", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: finalText.trim(), isFinal: true }),
-        }).catch(() => undefined);
-        stopWebSpeech();
-        sendEdit(finalText.trim());
+      if (eventFinal.trim()) {
+        // Recognizer declares final and the mic is still on: its call.
+        // (Muted mid-utterance goes through micOff instead — override.)
+        void finalizeAndSend(sessionText());
       } else if (interim.trim()) {
         fetch("/api/transcript", {
           method: "POST",
@@ -302,6 +356,7 @@ window.addEventListener("message", (e) => {
 });
 
 refreshHistory();
+renderMicButton();
 
 window.mhacks = {
   invoke,
@@ -313,4 +368,8 @@ window.mhacks = {
   refreshHistory,
   startWebSpeech,
   stopWebSpeech,
+  micOff,
+  finalizeAndSend,
+  sessionText,
+  renderMicButton,
 };
