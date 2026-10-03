@@ -1,0 +1,16 @@
+{
+  "name": "@mhacks/orchestrator",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "probe": "node --experimental-strip-types --env-file=../../.env --import ./dev-register.mjs ./scripts/probe.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@mhacks/contracts": "workspace:*"
+  }
+}

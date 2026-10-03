@@ -39,7 +39,7 @@ export interface Decision {
   op: string | null;
   param: string | null;
   route: Route;
-  riskScore: number; // 0-1; >= APPLY_THRESHOLD requires Confirm
+  riskScore: number; // 0-1; >= APPLY_THRESHOLD widens undo-window; never a Confirm dialog (grill-locked auto-apply)
   /** noul gate: 1 = handling it via catalog is correct, 0 = escalate to LLM. */
   inCatalog: number;
   confidence: number; // margin, NOT probability of correctness — per vendor docs
@@ -55,12 +55,17 @@ export interface VerifyDecision {
   matches: number; // 0-1 noul; below RETRY_THRESHOLD triggers one retry
 }
 
-/** Thresholds live in code, not in Jev — code owns policy. */
+/** Thresholds live in code, not in Jev — code owns policy.
+ *  Grill-locked: APPLY_THRESHOLD widens the undo-window, never gates a dialog.
+ *  Retry: cap 3 error-fed build retries, then revert + fail card (user vote for
+ *  unlimited overruled per griller objection, resolved at freeze).
+ *  Tuning any value requires noting the probe run that informed it. */
 export const POLICY = {
-  APPLY_THRESHOLD: 0.8, // riskScore >= this requires Confirm
+  APPLY_THRESHOLD: 0.8, // riskScore >= this widens undo-window; no Confirm in demo path
   AUTOMATION_MIN: 0.7, // inCatalog below this routes to LLM
   ACTIONABLE_MIN: 0.6, // actionable below this is dropped as chatter
   RETRY_THRESHOLD: 0.7, // verify.matches below this triggers one retry
+  MAX_RETRIES: 3, // build-gate retries max; then revert + "couldn't apply" card
   MAX_CANDIDATES: 5,
   DECISION_TIMEOUT_MS: 1500,
   STATE_TOKEN_BUDGET: 20_000, // stay under Jev's 32k shared limit with headroom
