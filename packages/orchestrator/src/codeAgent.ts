@@ -21,6 +21,10 @@ export interface EditFileContext {
   currentText?: string;
   /** Parent file section resolved at apply time (§5.4b). */
   parentSection?: string | null;
+  /** Template scope from Dev C (framework + file list). No wide codebase
+   *  search: filePath arrives via Dev A's data-source attr, and the model
+   *  must not look beyond the listed files. */
+  projectContext?: string;
   /** Previous build-gate failure (error-fed retry, grill-locked). */
   lastError?: string | null;
   attempt?: number;
@@ -50,6 +54,9 @@ export function buildEditPrompt(req: EditRequest, files: EditFileContext = {}): 
   if (files.parentSection) {
     lines.push(`Parent layout context (read-only, do not reproduce): ${files.parentSection.slice(0, 1000)}`);
   }
+  if (files.projectContext) {
+    lines.push(`Project context (template scope — work only within these files, no codebase search): ${files.projectContext.slice(0, 1000)}`);
+  }
   if (files.lastError) {
     lines.push(`Previous attempt failed the build gate with: ${files.lastError}. Fix only that; keep everything else identical.`);
   }
@@ -68,6 +75,7 @@ export interface FlashLiteOptions {
   logger?: { warn(...args: unknown[]): void };
   currentText?: string;
   parentSection?: string | null;
+  projectContext?: string;
   lastError?: string | null;
   attempt?: number;
 }
@@ -86,11 +94,30 @@ function editFileContext(options: FlashLiteOptions): EditFileContext {
   if (options.parentSection !== undefined && options.parentSection !== null) {
     ctx.parentSection = options.parentSection;
   }
+  if (options.projectContext !== undefined) ctx.projectContext = options.projectContext;
   if (options.lastError !== undefined && options.lastError !== null) {
     ctx.lastError = options.lastError;
   }
   if (options.attempt !== undefined) ctx.attempt = options.attempt;
   return ctx;
+}
+
+export type ContentPart =
+  | { text: string }
+  | { inline_data: { mime_type: string; data: string } };
+
+/** Multimodal request parts: prompt text + the target screenshot crop when the
+ *  prober supplied one (base64 PNG, data-URL prefix tolerated). Crop path is
+ *  constructor-tested; no live key has exercised it yet (harness probe sends
+ *  none) — confirm against the REST reference before demoing it. */
+export function buildContentParts(req: EditRequest, files: EditFileContext = {}): ContentPart[] {
+  const parts: ContentPart[] = [{ text: buildEditPrompt(req, files) }];
+  const raw = req.target.screenshotCrop;
+  if (typeof raw === "string" && raw.length > 0) {
+    const data = raw.replace(/^data:image\/\w+;base64,/, "");
+    if (data.length > 0) parts.push({ inline_data: { mime_type: "image/png", data } });
+  }
+  return parts;
 }
 
 /** Returns the complete replacement file text, or null when unusable (caller treats as build-fail). */
@@ -118,7 +145,7 @@ export async function generateNarrowDiff(
           contents: [
             {
               role: "user",
-              parts: [{ text: buildEditPrompt(req, editFileContext(options)) }],
+              parts: buildContentParts(req, editFileContext(options)),
             },
           ],
         }),

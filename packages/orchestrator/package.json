@@ -6,9 +6,11 @@
   "main": "src/index.ts",
   "scripts": {
     "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --import ./dev-register.mjs --test tests/*.test.ts",
     "probe": "node --experimental-strip-types --env-file=../../.env --import ./dev-register.mjs ./scripts/probe.mjs"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "typescript": "^5.7.0"
   },
   "dependencies": {

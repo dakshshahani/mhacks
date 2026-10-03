@@ -9,6 +9,7 @@ import {
   RADIUS_TOKENS,
   SPACING_TOKENS,
   ALIGN_TOKENS,
+  POLICY,
   type Decision,
   type EditOp,
   type EditRequest,
@@ -64,8 +65,12 @@ export function composeEditRequest(input: ComposeInput): EditRequest | null {
     (c) => c.id === input.decision.target,
   );
   if (!target) return null;
-  const op = toEditOp(input.decision.op, input.decision.param);
-  // Closure enforcement: no-llm with an unexecutable op escalates to small.
+  // Closure enforcement (dev-b.md §5): never force a catalog choice when the
+  // truth isn't in the catalog. Below AUTOMATION_MIN the op is void even when
+  // syntactically valid — the LLM generates instead.
+  const catalogOk = input.decision.inCatalog >= POLICY.AUTOMATION_MIN;
+  const op = catalogOk ? toEditOp(input.decision.op, input.decision.param) : null;
+  // Escalation floor is small (LLM generates); a Jev large stays large.
   const route =
     input.decision.route === "no-llm" && op === null
       ? "small"

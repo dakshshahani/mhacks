@@ -22,6 +22,11 @@ export interface ElementCandidate {
   trackedConfidence: number;
   /** Ops we can Tier-1 patch on this element, declared by the prober. */
   supportedOps: EditOp[];
+  /** Optional target crop for the code model (base64 PNG, small — the prober
+   *  captures the element region, not the screen). Null until Dev A supplies
+   *  it; JSON-safe across webview/IPC. The Flash-Lite fallback input carries
+   *  transcript + target (incl. this crop) + projectContext. */
+  screenshotCrop?: string | null;
 }
 
 export interface GazeFrame {

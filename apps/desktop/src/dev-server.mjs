@@ -10,7 +10,7 @@
 // executor always applies for real so commitSha/undo stay truthful.
 
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FileGitService } from "@mhacks/shell";
@@ -100,6 +100,18 @@ function templateBuildGate() {
   };
 }
 
+// Template scope for the Flash-Lite fallback (instruction-locked): filePath
+// arrives via Dev A's data-source attr — no wide codebase search, the model
+// works only within these files.
+const demoFiles = await readdir(demoRoot)
+  .then((fs) => fs.filter((f) => !f.startsWith(".")).join(", "))
+  .catch(() => "Hero.tsx");
+const projectContext =
+  "React JSX template with Tailwind-style utilities; preview CSS defines only " +
+  "bg-brand/bg-muted/bg-accent, rounded-sm/md/lg/full, p-2/4/8, gap-2/4/8, " +
+  "text-left/center/right/justify. " +
+  `Template files: ${demoFiles}. Work only within these files.`;
+
 const router = new IpcRouter({
   git,
   preview,
@@ -125,6 +137,7 @@ const router = new IpcRouter({
       generateNarrowDiff(req, {
         currentText: ctx.currentText,
         parentSection: ctx.parentSection,
+        projectContext,
         lastError: ctx.lastError,
         attempt: ctx.attempt,
       }),
