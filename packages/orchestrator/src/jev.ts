@@ -29,15 +29,19 @@ const INTENTS: readonly Intent[] = [
   "other",
 ];
 const ROUTES: readonly Route[] = ["no-llm", "small", "large"];
-const OPS = [
-  "set-color",
-  "set-radius",
-  "set-spacing",
-  "set-align",
-  "hide",
-  "swap-text",
-  "none",
-] as const;
+/** Single source for the Jev op menu. Adding an op means one entry here
+ *  plus its Tier-1 executor (contracts EditOp + renderer case) — the menu
+ *  must never offer what nothing executes. */
+const OP_BLURBS: Record<string, string> = {
+  "set-color": "Change a color token",
+  "set-radius": "Change corner rounding",
+  "set-spacing": "Change spacing or padding",
+  "set-align": "Change text alignment",
+  hide: "Hide the element",
+  "swap-text": "Replace the element text",
+  none: "No catalog op fits; custom code needed",
+};
+const OPS: readonly string[] = Object.keys(OP_BLURBS);
 const PARAMS = [
   "brand",
   "muted",
@@ -144,15 +148,9 @@ export function buildQuestions(input: DecisionInput): Record<string, JevQuestion
     op: {
       type: "choice",
       instructions: "Which catalog edit op handles it?",
-      criteria: {
-        "set-color": "Change a color token",
-        "set-radius": "Change corner rounding",
-        "set-spacing": "Change spacing or padding",
-        "set-align": "Change text alignment",
-        hide: "Hide the element",
-        "swap-text": "Replace the element text",
-        none: "No catalog op fits; custom code needed",
-      },
+      criteria: Object.fromEntries(
+        OPS.map((o) => [o, OP_BLURBS[o] ?? null]),
+      ),
     },
     param: {
       type: "choice",
@@ -219,6 +217,36 @@ function clamp01(n: unknown, fallback: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
+/** Shared Jev call envelope: the hard timeout wins even against transports
+ *  that ignore the abort signal, and the timer is always cleaned up. */
+export async function withJevTimeout<T>(
+  task: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(message));
+    }, timeoutMs);
+    controller.signal.addEventListener("abort", () => clearTimeout(timer), {
+      once: true,
+    });
+  });
+  try {
+    return await Promise.race([task(controller.signal), timeout]);
+  } finally {
+    controller.abort();
+  }
+}
+
+/** Build-gate retry policy: error-fed retries while attempts remain.
+ *  Gives POLICY.MAX_RETRIES its reader — the executor calls this. */
+export function shouldRetry(failedAttempts: number): boolean {
+  return failedAttempts < POLICY.MAX_RETRIES;
+}
+
 interface JevAnswers {
   [name: string]: {
     choice?: unknown;
@@ -272,15 +300,14 @@ export function sanitizeDecision(raw: unknown, input: DecisionInput): Decision {
   let target = topChoice(answers, "target");
   const targetProb = probs(answers, "target")[target] ?? 0;
   if (targetProb < 0.5 || target === "none" || !validIds.has(target)) {
-    // Fallback: component under the pointer. pointerOver may carry an id or
-    // a component name depending on the producer — accept both.
+    // Fallback: component under the pointer. Id-only per contract §6.1 —
+    // producers must send the CandidateId (never a name/label) in
+    // DecisionInput.pointerOver.
     const over = input.pointerOver;
-    const byName =
-      over === null || over === undefined
-        ? undefined
-        : (input.components.find((c) => c.componentName === over)?.id ??
-          (validIds.has(over) ? over : undefined));
-    target = byName ?? "none";
+    target =
+      over !== null && over !== undefined && validIds.has(over)
+        ? over
+        : "none";
   }
   const resolvedTarget = target === "none" ? null : target;
   const intentRaw = topChoice(answers, "intent");
@@ -289,9 +316,7 @@ export function sanitizeDecision(raw: unknown, input: DecisionInput): Decision {
     : "other";
   const opRaw = topChoice(answers, "op");
   const op =
-    opRaw === "none" || !(OPS as readonly string[]).includes(opRaw)
-      ? null
-      : opRaw;
+    opRaw === "none" || !OPS.includes(opRaw) ? null : opRaw;
   const paramRaw = topChoice(answers, "param");
   let param: string | null = null;
   if (paramRaw.startsWith("span")) {
@@ -351,21 +376,12 @@ export function createJevLayer(options: JevLayerOptions = {}): DecisionLayer {
       const request = buildRequest(input);
       options.logger?.debug("[jev] in", request);
       const transport = options.transport ?? defaultTransport(apiKey, endpoint);
-      const controller = new AbortController();
-      const timeout = new Promise<never>((_, reject) => {
-        const timer = setTimeout(() => {
-          controller.abort();
-          reject(new Error(`jev timeout after ${timeoutMs}ms`));
-        }, timeoutMs);
-        controller.signal.addEventListener("abort", () => clearTimeout(timer), {
-          once: true,
-        });
-      });
       try {
-        const raw = await Promise.race([
-          transport(request, controller.signal),
-          timeout,
-        ]);
+        const raw = await withJevTimeout(
+          (signal) => transport(request, signal),
+          timeoutMs,
+          `jev timeout after ${timeoutMs}ms`,
+        );
         const decision = sanitizeDecision(raw, input);
         options.logger?.debug("[jev] out", decision);
         return decision;
@@ -375,8 +391,6 @@ export function createJevLayer(options: JevLayerOptions = {}): DecisionLayer {
           err instanceof Error ? err.message : err,
         );
         return fallback.decide(input);
-      } finally {
-        controller.abort();
       }
     },
   };
@@ -428,21 +442,12 @@ export async function verifyDecision(
   const transport =
     options.transport ?? defaultTransport(apiKey, options.endpoint ?? ENDPOINT);
   const timeoutMs = options.timeoutMs ?? POLICY.DECISION_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timeout = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(`jev-verify timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
-    controller.signal.addEventListener("abort", () => clearTimeout(timer), {
-      once: true,
-    });
-  });
   try {
-    const raw = await Promise.race([
-      transport(request, controller.signal),
-      timeout,
-    ]);
+    const raw = await withJevTimeout(
+      (signal) => transport(request, signal),
+      timeoutMs,
+      `jev-verify timeout after ${timeoutMs}ms`,
+    );
     const answers =
       typeof raw === "object" && raw !== null
         ? ((raw as { answers?: unknown }).answers as JevAnswers | undefined)
@@ -455,7 +460,5 @@ export async function verifyDecision(
       err instanceof Error ? err.message : err,
     );
     return pass;
-  } finally {
-    controller.abort();
   }
 }

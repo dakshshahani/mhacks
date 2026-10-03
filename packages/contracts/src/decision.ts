@@ -24,7 +24,7 @@ export interface SpeechEvent {
 export interface DecisionInput {
   transcript: string;
   pointer: { x: number; y: number } | null;
-  pointerOver: string | null;
+  pointerOver: string | null; // CandidateId under the pointer (id only, never a name/label — contract §6.1)
   components: ElementCandidate[]; // visible component list — criteria source
   textSpans?: string[]; // extracted candidate spans from transcript
 }

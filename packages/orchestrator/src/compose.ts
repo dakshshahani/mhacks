@@ -8,6 +8,7 @@ import {
   COLOR_TOKENS,
   RADIUS_TOKENS,
   SPACING_TOKENS,
+  ALIGN_TOKENS,
   type Decision,
   type EditOp,
   type EditRequest,
@@ -23,51 +24,45 @@ export interface ComposeInput {
   references?: ElementCandidate[];
 }
 
-let seq = 0;
+let editSeq = 0;
 
-function isColor(p: string): boolean {
-  return (COLOR_TOKENS as readonly string[]).includes(p);
-}
-
-function isRadius(p: string): p is "sm" | "md" | "lg" | "full" {
-  return (RADIUS_TOKENS as readonly string[]).includes(p);
-}
-
-function isSpacing(p: string): p is "tight" | "normal" | "loose" {
-  return (SPACING_TOKENS as readonly string[]).includes(p);
-}
+/** Single token table: op -> valid params. An op is Tier-1-executable iff
+ *  it appears here with its param inside the frozen tokens. */
+const TOKEN_SETS = {
+  "set-color": COLOR_TOKENS,
+  "set-radius": RADIUS_TOKENS,
+  "set-spacing": SPACING_TOKENS,
+  "set-align": ALIGN_TOKENS,
+} as const;
+type TokenOp = keyof typeof TOKEN_SETS;
 
 function toEditOp(op: string | null, param: string | null): EditOp | null {
-  switch (op) {
-    case "set-color":
-      return typeof param === "string" && isColor(param)
-        ? { op: "set-color", param }
-        : null;
-    case "set-radius":
-      return typeof param === "string" && isRadius(param)
-        ? { op: "set-radius", param }
-        : null;
-    case "set-spacing":
-      return typeof param === "string" && isSpacing(param)
-        ? { op: "set-spacing", param }
-        : null;
-    case "hide":
-      return { op: "hide", param: null };
-    case "swap-text":
-      return typeof param === "string" && param.length > 0
-        ? { op: "swap-text", param }
-        : null;
-    default:
-      // set-align, unknown verbs, or null: no Tier-1 executor — LLM generates.
-      return null;
+  if (op === "hide") return { op: "hide", param: null };
+  if (op === "swap-text") {
+    return typeof param === "string" && param.length > 0
+      ? { op: "swap-text", param }
+      : null;
   }
+  if (
+    op !== null &&
+    op in TOKEN_SETS &&
+    typeof param === "string" &&
+    (TOKEN_SETS[op as TokenOp] as readonly string[]).includes(param)
+  ) {
+    return { op, param } as EditOp;
+  }
+  // Unknown verbs or off-catalog params: no Tier-1 executor — LLM generates.
+  return null;
 }
 
 export function composeEditRequest(input: ComposeInput): EditRequest | null {
   if (input.decision.target === null) return null;
-  const target =
-    input.frame.candidates.find((c) => c.id === input.decision.target) ??
-    input.frame.lockedTarget;
+  // Strict id join: a target absent from THIS frame (stale decision, gaze
+  // moved on) resolves to null, never to a silent substitute. The caller must
+  // compose against the frame the decision was made on.
+  const target = input.frame.candidates.find(
+    (c) => c.id === input.decision.target,
+  );
   if (!target) return null;
   const op = toEditOp(input.decision.op, input.decision.param);
   // Closure enforcement: no-llm with an unexecutable op escalates to small.
@@ -76,7 +71,7 @@ export function composeEditRequest(input: ComposeInput): EditRequest | null {
       ? "small"
       : input.decision.route;
   const req: EditRequest = {
-    id: input.id ?? `e-${Date.now().toString(36)}-${seq++}`,
+    id: input.id ?? `e-${Date.now().toString(36)}-${editSeq++}`,
     transcript: input.transcript,
     intent: input.decision.intent,
     target,

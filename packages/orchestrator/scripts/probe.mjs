@@ -6,7 +6,7 @@ import { generateNarrowDiff } from "../src/codeAgent.ts";
 import { composeEditRequest } from "../src/compose.ts";
 import { POLICY } from "@mhacks/contracts";
 
-const cand = (id, name, file) => ({
+const candidate = (id, name, file) => ({
   id,
   selector: `.${id}`,
   componentName: name,
@@ -19,9 +19,9 @@ const cand = (id, name, file) => ({
   supportedOps: [],
 });
 const COMPONENTS = [
-  cand("hero", "Hero", "Hero.tsx"),
-  cand("button", "PrimaryButton", "Hero.jsx"),
-  cand("footer", "Footer", "Footer.jsx"),
+  candidate("hero", "Hero", "Hero.tsx"),
+  candidate("button", "PrimaryButton", "Hero.jsx"),
+  candidate("footer", "Footer", "Footer.jsx"),
 ];
 
 const cases = [
@@ -34,32 +34,32 @@ const cases = [
 ];
 
 const layer = createJevLayer();
-for (const t of cases) {
+for (const transcript of cases) {
   const t0 = Date.now();
-  const d = await layer.decide({
-    transcript: t,
+  const decision = await layer.decide({
+    transcript,
     pointer: { x: 400, y: 300 },
     pointerOver: "hero",
     components: COMPONENTS,
   });
   const ms = Date.now() - t0;
-  const dropped = d.actionable < POLICY.ACTIONABLE_MIN || d.target === null;
+  const dropped = decision.actionable < POLICY.ACTIONABLE_MIN || decision.target === null;
   const req = dropped
     ? null
     : composeEditRequest({
-      transcript: t,
-      decision: d,
+      transcript,
+      decision,
       frame: { candidates: COMPONENTS, lockedTarget: null, capturedAt: Date.now() },
     });
   console.log(JSON.stringify({
-    t,
+    t: transcript,
     ms,
-    act: d.actionable,
+    act: decision.actionable,
     dropped,
-    target: d.target,
-    intent: d.intent,
-    op: d.op,
-    route: d.route,
+    target: decision.target,
+    intent: decision.intent,
+    op: decision.op,
+    route: decision.route,
     composed: req === null ? null : { op: req.op, route: req.route },
   }));
 }

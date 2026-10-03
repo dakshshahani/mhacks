@@ -158,6 +158,7 @@ unblock PM/Dev A.
 set-color {brand,muted,accent} → className += token class (must match PM tokens exactly)
 set-radius {sm,md,lg,full}     → rounded-* class swap
 set-spacing {tight,normal,loose} → padding/gap class swap
+set-align {left,center,right,justify} → text-align swap (added grill-follow-up: basic verb, Jev-confirmed)
 hide                        → hidden class / display:none
 swap-text {string}          → textContent replace from transcript span
 ```
