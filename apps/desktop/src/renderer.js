@@ -140,6 +140,10 @@ function renderPipeline(state) {
     // Edge-triggered from the last /api/decide-and-edit response (which
     // carries undoWindowMs); the event alone re-renders the status line.
     if (lastApplied && state.editId === lastApplied.editRequest.id) {
+      const secs = Math.round(lastApplied.undoWindowMs / 1000);
+      setStatus(
+        `Done: ${describeOp(lastApplied.editRequest)} (${lastApplied.editResult.filesChanged.join(", ")} @ ${lastApplied.editResult.commitSha.slice(0, 8)}) — undo within ${secs}s to revert`,
+      );
       showUndoCircle(lastApplied.undoWindowMs);
     }
     refreshHistory();
@@ -149,8 +153,13 @@ function renderPipeline(state) {
     refreshHistory();
   }
   if (state.statusLine) setStatus(state.statusLine);
-  else if (state.stage === "applied") setStatus(`Applied${state.pendingAction === "undo-window" ? " — undo window open" : ""}`);
-  else if (state.stage === "idle") setStatus("idle");
+  else if (state.stage === "applied") {
+    // Never clobber our own Done line (set above) with the generic text;
+    // only narrate applied states we didn't initiate (other tab, reload).
+    if (!(lastApplied && state.editId === lastApplied.editRequest.id)) {
+      setStatus(`Applied${state.pendingAction === "undo-window" ? " — undo window open" : ""}`);
+    }
+  } else if (state.stage === "idle") setStatus("idle");
   prevStage = state.stage;
 }
 
