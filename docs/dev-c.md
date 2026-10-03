@@ -147,6 +147,26 @@ unblock PM/Dev A.
 - G3 definition of done: real 3.5 Flash-Lite edit through Dev B's agent → real commit
   → undo works. The one-line mock→real swap is yours.
 
+### 5.4b Executor-context rule (locked with Dev B)
+
+An edit needs three views: **target** (what changes), **parent** (what
+constrains it — centering needs the container, widths need the sibling),
+**references** (what it relates to). Without the parent, the applier guesses
+layout blind — that class of bug already bit us in testing.
+
+Split by seam (addresses over the wire, content at apply time):
+
+- `EditRequest` carries the target in full + the parent as an **address only**
+  (`componentName` + `filePath`, one level, no HTML) + named `references`.
+  Payloads stay small and JSON-safe per §4.
+- Your executor resolves the address itself at apply time via the
+  `data-source` map: read the parent component's file section, check layout
+  context (flex/grid, alignment, inherited styles), then apply. You own the
+  filesystem — you do the reading; Dev B never ships file contents over IPC.
+- Tier-1 renderer needs only target + tokens (class swaps are local); the
+  parent matters for `small`/`large` diffs — read it before applying, include
+  it when calling the model for retry context.
+
 ### 5.5 Tier-1 patch renderer — the sub-2s path (~2h, pure code)
 
 - Input: `EditOp` union (Dev B's vocabulary) + `ElementCandidate.filePath`.
