@@ -1,9 +1,7 @@
 // Browser-harness client (plain JS — no TS, no imports).
 // Thin client over the ipc.ts contract + the pipeline SSE stream. No decision
 // logic here: intent/target/route arrive from Dev B via the server, which runs
-// decideAndEdit (Jev -> composeEditRequest -> agent:submitEdit) in Node. The
-// old hand-built demoEditRequest path is gone; the demo button below sends a
-// canned transcript THROUGH the real pipeline instead.
+// decideAndEdit (Jev -> composeEditRequest -> agent:submitEdit) in Node.
 
 const statusEl = document.querySelector("#status");
 const micEl = document.querySelector("#mic");
@@ -186,11 +184,6 @@ document.querySelector("#toggle")?.addEventListener("click", async () => {
 
 document.querySelector("#send")?.addEventListener("click", () => {
   sendEdit();
-});
-
-document.querySelector("#demo-edit")?.addEventListener("click", () => {
-  if (transcriptEl) transcriptEl.value = "make it brand";
-  sendEdit("make it brand");
 });
 
 document.querySelector("#new-version")?.addEventListener("click", async () => {
