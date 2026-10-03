@@ -92,12 +92,23 @@ export class FileGitService {
     return snap;
   }
 
-  /** Revert tree to the state before the last snapshot. No-op message when empty. */
+  /** Revert to the state before the last snapshot (git-reset semantics).
+   *  Pops exactly one entry and restores the new tail (or an empty tree when
+   *  nothing remains). An undone entry is removed, so consecutive undos walk
+   *  back through history and can never oscillate back into an undone state.
+   *  Throws when history is empty (router maps to not-ready). */
   async undo(): Promise<{ snap: Snapshot; restored: boolean }> {
     const list = await this.history();
     const last = list[list.length - 1];
     if (!last) throw new Error("nothing to undo");
-    const prev = list[list.length - 2];
+    const rest = list.slice(0, -1);
+    const prev = rest[rest.length - 1];
+    // Drop the undone snapshot dir (best-effort hygiene, not load-bearing).
+    try {
+      await fs.rm(path.join(this.storeDir, last.sha), { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
     const srcDir = prev ? path.join(this.storeDir, prev.sha) : null;
     // Clear tracked files (keep the store itself).
     const files: string[] = [];
@@ -116,11 +127,15 @@ export class FileGitService {
         await fs.copyFile(s, d);
       }
     }
-    const restored: Snapshot = { sha: makeSha(), label: `undo ${last.sha}`, at: Date.now() };
-    // Record the undo as a new history entry so timeline shows it.
-    const next = [...list, restored];
-    await this.saveHistory(next);
-    return { snap: restored, restored: true };
+    const snap: Snapshot = prev ?? {
+      sha: makeSha(),
+      label: `undo ${last.sha}`,
+      at: Date.now(),
+    };
+    // History only ever holds checkpoints: the undone entry is gone and no
+    // undo marker is appended, so undo-then-undo keeps walking back.
+    await this.saveHistory(rest);
+    return { snap, restored: true };
   }
 
   /** Power-path commit marker on a pre-commit sha. Resolves the entry. */
