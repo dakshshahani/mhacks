@@ -29,7 +29,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${jost.className} ${inter.variable}`}>
       <body className="bg-[#0a0a0a] text-white antialiased">
-<<<<<<< HEAD
         {children}
         {/* Gaze blob: one liquid-glass cursor + global spacebar router for every page. */}
         <Blob />

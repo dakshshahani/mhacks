@@ -225,6 +225,12 @@ if (!app.requestSingleInstanceLock()) {
     installMenu();
     grantMedia();
     hardenGuests();
+    // Local services boot in EVERY mode (cheap, idle when unused): the
+    // renderer prefers the native bridge whenever preload exists, so a
+    // window without a registered bridge breaks every channel at once
+    // (invoke/decide/transcribe/permissions) with "No handler registered".
+    // Lesson learned the hard way: never gate this on the window target.
+    await bootDemoShell();
     if (APP_URL_OVERRIDE) {
       // Dev launcher full-app: servers supervised outside; window only.
       createWindow({ url: APP_URL_OVERRIDE });

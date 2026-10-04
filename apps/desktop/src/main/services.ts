@@ -10,7 +10,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DevServerManager,
-  FileGitService,
+  GitService,
   IpcRouter,
   PreviewHost,
   SpeechService,
@@ -175,7 +175,7 @@ export async function createServices(
   demoRoot: string,
   emit: (event: ShellEvent) => void,
 ): Promise<DemoServices> {
-  const git = new FileGitService(demoRoot);
+  const git = new GitService(demoRoot);
   const preview = new PreviewHost();
   const speech = new SpeechService([
     { kind: "web-speech", isAvailable: () => true },

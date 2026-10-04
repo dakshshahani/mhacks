@@ -186,8 +186,14 @@ export async function decideAndEdit(transcript, x, y) {
     res = await transportDecideAndEdit(body, currentProject());
   } catch {
     // Server unreachable mid-send: release the mic so the chip can't strand
-    // in listening/processing with no pipeline behind it.
-    await invoke("speech:stop", undefined);
+    // in listening/processing with no pipeline behind it. The stop itself is
+    // guarded — a dead bridge must surface "server unreachable", never a
+    // second throw that freezes the send button on "Sending…" forever.
+    try {
+      await invoke("speech:stop", undefined);
+    } catch {
+      // Bridge dead too; the status below already says enough.
+    }
     return { status: 0, body: { ok: false, code: "unknown", message: "server unreachable" } };
   }
   return res;
