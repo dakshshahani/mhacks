@@ -20,7 +20,7 @@ import { FileGitService } from "@mhacks/shell";
 import { PreviewHost } from "@mhacks/shell";
 import { SpeechService } from "@mhacks/shell";
 import { IpcRouter } from "@mhacks/shell";
-import { DevServerManager, pickFreePort, findComponentFiles, findTextFiles, submitEdit as executorSubmitEdit } from "@mhacks/shell";
+import { DevServerManager, pickFreePort, findComponentFiles, findMarkupFiles, findTextFiles, submitEdit as executorSubmitEdit } from "@mhacks/shell";
 import { mockJev } from "@mhacks/contracts";
 import {
   PipelineMachine,
@@ -899,8 +899,9 @@ function sanitizeFrame(raw) {
 /** Hybrid file resolution (grill-locked): text-anchored for content intents
  *  (the quoted span names the text; its file is the USAGE file, which matters
  *  more than where the component is defined), component-anchored otherwise
- *  (convention search, instant and deterministic), LLM tie-break only when
- *  0-or-2+ files match. Returns a root-relative path or null (fail card). */
+ *  (convention search, then rendered-markup evidence), LLM tie-break only
+ *  when multiple evidence-backed files match. Returns a root-relative path or
+ *  null (fail card). */
 async function resolveTargetFile(ctx, target, transcript, intent) {
   const contextHTML =
     typeof target.contextHTML === "string" && target.contextHTML.length > 0
@@ -952,6 +953,39 @@ async function resolveTargetFile(ctx, target, transcript, intent) {
         matches.map((m) => m.path),
         name,
       );
+      if (picked) return picked;
+    }
+  }
+
+  // 3. Rendered-markup fallback. A clicked host element can sit inside an
+  // inline/anonymous component, or behind a forwardRef wrapper, so the fiber
+  // name above may not exist as a source definition. Class tokens and visible
+  // text survive rendering and provide stronger evidence for the file that
+  // contains this instance. Multiple matches still go through the same
+  // allowlisted model tie-break; no file is guessed when evidence is absent.
+  const targetMarkup = target.outerHTMLSnippet ?? "";
+  const markup = [targetMarkup, contextHTML ?? ""].join("\n");
+  const markers = [];
+  for (const match of markup.matchAll(/\bclass(?:Name)?=["']([^"']+)["']/g)) {
+    for (const token of match[1].split(/\s+/)) {
+      if (token.length >= 3) markers.push(token);
+    }
+  }
+  const visibleText = targetMarkup
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (visibleText.length >= 2 && visibleText.length <= 120) markers.push(visibleText);
+  if (markers.length > 0) {
+    let matches = [];
+    try {
+      matches = await findMarkupFiles(ctx.root, markers);
+    } catch {
+      matches = [];
+    }
+    if (matches.length > 0) {
+      console.log(`[edit] ${ctx.name}: rendered-markup evidence -> ${matches.length} file(s)`);
+      const picked = await pickFrom(matches, "rendered markup");
       if (picked) return picked;
     }
   }

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findComponentFiles, findTextFiles } from "../src/fileIndex";
+import { findComponentFiles, findMarkupFiles, findTextFiles } from "../src/fileIndex";
 
 async function makeTree(files: Record<string, string>): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "mhacks-idx-"));
@@ -59,5 +59,19 @@ describe("fileIndex", () => {
     assert.deepEqual(await findTextFiles(root, "Finance Planner"), ["src/app/login.tsx"]);
     assert.deepEqual(await findTextFiles(root, "missing text"), []);
     assert.deepEqual(await findTextFiles(root, "x"), []);
+  });
+
+  it("findMarkupFiles ranks files by rendered class/text evidence", async () => {
+    const root = await makeTree({
+      "src/page.tsx": `export const Page = () => <button className="bg-blue-500 px-4">Launch</button>;`,
+      "src/styles.tsx": `export const styles = "bg-blue-500";`,
+      "src/other.tsx": `export const Other = () => <div>Launch</div>;`,
+      "src/static.html": `<button class="bg-blue-500 px-4">Launch</button>`,
+    });
+    assert.deepEqual(
+      await findMarkupFiles(root, ["bg-blue-500", "px-4", "Launch"]),
+      ["src/page.tsx", "src/static.html"],
+    );
+    assert.deepEqual(await findMarkupFiles(root, ["x"]), []);
   });
 });

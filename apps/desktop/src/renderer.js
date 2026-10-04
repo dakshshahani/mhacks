@@ -215,6 +215,10 @@ export async function sendEdit(transcript) {
   reloadPreview();
   refreshHistory();
   pipeBusy = false;
+  // A completed utterance belongs to the edit that just applied. Clear it so
+  // the next mic session starts with an empty command instead of appending to
+  // stale text from the previous component.
+  if (transcriptEl) transcriptEl.value = "";
   updateSendButton();
 }
 
@@ -304,39 +308,52 @@ events.onmessage = (e) => {
 
 // Zoom-style mic: one button, bound to the server mic state (single source
 // of truth over SSE — never a local guess). Click to unmute, click again to
-// mute. Muting finalizes immediately (see micOff): whatever was captured so
-// far processes now instead of waiting on the recognizer.
+// mute. A mic session stays active across auto-submitted utterances; muting
+// finalizes immediately (see micOff): whatever was captured so far processes
+// now instead of waiting on the recognizer.
 let serverMicState = "off";
+let micSessionActive = false;
 
 export function renderMicButton() {
   const btn = document.querySelector("#mic-toggle");
   if (!btn) return;
-  const live = serverMicState === "listening" || serverMicState === "processing";
+  const live =
+    micSessionActive || serverMicState === "listening" || serverMicState === "processing";
   btn.textContent = live ? "🔇 Mic off" : "🎙 Mic on";
   btn.setAttribute("aria-pressed", live ? "true" : "false");
 }
 
+/** Start one recognizer turn inside the current continuous mic session. */
+async function beginMicCapture() {
+  const r = await invoke("speech:start", undefined);
+  if (!r.ok) {
+    micSessionActive = false;
+    setStatus(`mic: ${r.message ?? r.code}`);
+    renderMicButton();
+    return false;
+  }
+  if (!micSessionActive) {
+    await invoke("speech:stop", undefined);
+    return false;
+  }
+  serverMicState = "listening";
+  setMic("listening");
+  renderMicButton();
+  startWebSpeech();
+  // Scribe fallback records the same utterance in parallel. It is consumed
+  // only if this recognizer turn produces no Web Speech text.
+  void startRecorder();
+  return true;
+}
+
 document.querySelector("#mic-toggle")?.addEventListener("click", async () => {
-  if (serverMicState === "off") {
-    const r = await invoke("speech:start", undefined);
-    if (!r.ok) {
-      setStatus(`mic: ${r.message ?? r.code}`);
-      return;
-    }
-    // Optimistic chip flip: the SSE echo confirms it, but the toggle must
-    // not depend on stream timing (proxy lag, restart gaps) — otherwise the
-    // button reads "Mic on" while the server is already listening and the
-    // second click re-arms instead of muting.
-    serverMicState = "listening";
-    setMic("listening");
+  if (!micSessionActive && serverMicState === "off") {
+    // Set this before awaiting the server so the user can click Mic off even
+    // if the IPC/SSE echo is slow.
+    micSessionActive = true;
     renderMicButton();
     setStatus("Listening… speak, then mic off");
-    startWebSpeech();
-    // Scribe fallback records the same utterance in parallel (dev-c.md §5.6:
-    // Web Speech primary, Scribe fallback). Costs nothing unless uploaded:
-    // mic-off uploads ONLY when Web Speech produced no text (fork without
-    // speech keys, Safari, network-error session).
-    void startRecorder();
+    await beginMicCapture();
   } else {
     await micOff();
   }
@@ -347,6 +364,7 @@ document.querySelector("#mic-toggle")?.addEventListener("click", async () => {
  *  buffered text processes now. Empty buffer means nothing was said: just
  *  stop, pipeline untouched. */
 export async function micOff() {
+  micSessionActive = false;
   // Optimistic chip reset (mirrors the on-start flip): mute reads instantly
   // even if the SSE echo is delayed. The pipeline flow re-arms via SSE.
   serverMicState = "off";
@@ -385,7 +403,7 @@ export async function micOff() {
 }
 /** Shared finalize-and-send: recognizer-declared finals and mic-off
  *  overrides converge here — one code path into the pipeline. */
-export async function finalizeAndSend(text) {
+export async function finalizeAndSend(text, resumeMic = false) {
   const t = text.trim();
   if (!t) return;
   discardRecorder();
@@ -400,6 +418,10 @@ export async function finalizeAndSend(text) {
   if (transcriptEl) transcriptEl.value = t;
   updateSendButton();
   await sendEdit(t);
+  if (resumeMic && micSessionActive) {
+    await beginMicCapture();
+    if (micSessionActive) setStatus("Listening… speak, then mic off");
+  }
 }
 
 // STT capture (dev-c.md 5.6: Web Speech primary). The server owns the mic
@@ -412,6 +434,7 @@ export async function finalizeAndSend(text) {
 let webSpeechActive = false;
 let webSpeechRec = null;
 let webSpeechRetries = 0;
+let autoFinalizing = false;
 // Session buffer: finalized segments append, latest interim replaces.
 // micOff finalizes sessionText() without recognizer involvement.
 let sessionFinal = "";
@@ -429,6 +452,10 @@ export function startWebSpeech() {
   sessionFinal = "";
   sessionInterim = "";
   webSpeechRetries = 0;
+  // Each mic activation is a new command. Keep failed edits/type-to-send
+  // text intact, but never carry an already-applied utterance into this one.
+  if (transcriptEl) transcriptEl.value = "";
+  updateSendButton();
   startWebSpeechAttempt();
 }
 
@@ -461,7 +488,12 @@ function startWebSpeechAttempt() {
       if (eventFinal.trim()) {
         // Recognizer declares final and the mic is still on: its call.
         // (Muted mid-utterance goes through micOff instead — override.)
-        void finalizeAndSend(sessionText());
+        if (!autoFinalizing && micSessionActive) {
+          autoFinalizing = true;
+          void finalizeAndSend(sessionText(), true).finally(() => {
+            autoFinalizing = false;
+          });
+        }
       } else if (interim.trim()) {
         fetch("/api/transcript", {
           method: "POST",

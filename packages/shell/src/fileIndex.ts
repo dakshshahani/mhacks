@@ -1,4 +1,4 @@
-// Dev C: component -> file convention search (foreign-project editing).
+// Dev C: rendered component evidence -> file search (foreign-project editing).
 // The template demo never needs this (data-source attrs stamp every element),
 // but foreign pages carry no file stamps: the probe reports a componentName
 // from React fiber, and this module turns it into root-relative file paths.
@@ -27,7 +27,21 @@ const SKIP_DIRS = new Set([
   ".mhacks-snapshots",
 ]);
 
-const SOURCE_EXTS = new Set([".tsx", ".ts", ".jsx", ".js", ".mdx"]);
+// The probe works with any webview, not only React. Keep the source index
+// broad enough for plain HTML and common component formats so rendered
+// markup can still map back to the file that owns it.
+const SOURCE_EXTS = new Set([
+  ".html",
+  ".htm",
+  ".tsx",
+  ".ts",
+  ".jsx",
+  ".js",
+  ".mdx",
+  ".vue",
+  ".svelte",
+  ".astro",
+]);
 
 const MAX_FILES_VISITED = 2000;
 const MAX_FILE_BYTES = 200 * 1024;
@@ -114,6 +128,53 @@ export async function findTextFiles(
     if (content !== null && content.includes(needle)) hits.push(rel);
   }
   return hits;
+}
+
+/**
+ * Find source files containing rendered-markup clues from a clicked element.
+ *
+ * Foreign previews do not carry data-source attributes, and React fiber names
+ * are not guaranteed to correspond to a source definition (inline JSX,
+ * anonymous route components, and forwardRef wrappers are common). The probe
+ * still gives us stable class/text markers from the rendered element. Rank
+ * files by how many independent markers they contain, then keep path order as
+ * the deterministic tie-break. Only the strongest evidence tier is returned;
+ * callers must still resolve ties explicitly. This function never guesses a
+ * file from a weaker match when a stronger one exists.
+ */
+export async function findMarkupFiles(
+  root: string,
+  markers: readonly string[],
+  maxHits = 20,
+): Promise<string[]> {
+  const unique = [...new Set(
+    markers
+      .map((marker) => marker.trim())
+      .filter((marker) => marker.length >= 2 && marker.length <= 200),
+  )];
+  if (unique.length === 0) return [];
+
+  const files = await listSourceFiles(root);
+  const scored: Array<{ path: string; score: number }> = [];
+  for (const rel of files) {
+    let content: string;
+    try {
+      const st = await fs.stat(path.join(root, rel));
+      if (st.size > MAX_FILE_BYTES) continue;
+      content = await fs.readFile(path.join(root, rel), "utf8");
+    } catch {
+      continue;
+    }
+    const score = unique.reduce((total, marker) => total + (content.includes(marker) ? 1 : 0), 0);
+    if (score > 0) scored.push({ path: rel, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const best = scored[0]?.score ?? 0;
+  return scored
+    .filter((match) => match.score === best)
+    .slice(0, maxHits)
+    .map((match) => match.path);
 }
 
 /** Ranked candidate files defining `componentName`. Empty name -> []. */
