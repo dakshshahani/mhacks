@@ -10,6 +10,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Command, GitBranch } from "lucide-react";
 import { saveCustomProject } from "../lib/projects";
+import { GLASS } from "../components/glass";
 
 declare global {
   interface Window {
@@ -18,7 +19,7 @@ declare global {
 }
 
 const CARD =
-  "group flex h-[288px] w-[336px] shrink-0 flex-col rounded-[24px] bg-gradient-to-b from-[#666666]/40 via-[#1d1d1d]/90 to-[#1d1d1d] p-[28px] text-left shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px] outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-white/70";
+  `group flex h-[288px] w-[336px] shrink-0 flex-col rounded-[24px] bg-gradient-to-b from-[#666666]/40 via-[#1d1d1d]/90 to-[#1d1d1d] p-[28px] text-left ${GLASS} outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-white/70`;
 
 function CardShell({ children }: { children: React.ReactNode }) {
   return <div className={CARD}>{children}</div>;
@@ -98,6 +99,7 @@ export default function ImportBoard() {
         />
         <span className="mt-auto block pt-[16px] text-[16px] font-normal leading-6 text-[#c5cad3]">
           Connect repository <span aria-hidden>→</span>
+          <span className="block pt-[8px] text-[14px] leading-5">Not yet — local projects only for now.</span>
         </span>
       </CardShell>
     </div>

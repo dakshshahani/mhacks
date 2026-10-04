@@ -4,8 +4,8 @@
    Frame geometry in 1280×832 coordinates — grid x56 y328 w1184, cards
    273×191 (32px gaps, 24px row gap), footer y770 (count + pagination pill),
    search bar x56 y246 240×38. First card is the create entry → /new.
-   Non-runnable scan entries render dimmed with their reason; opening one
-   surfaces the harness message inline. Live scan via /api/projects. */
+   Runnable-only flat scan (top-level dirs with package.json + dev script).
+   Live scan via /api/projects. */
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
@@ -45,13 +45,13 @@ function TileCard({
   project,
   selected,
   opening,
-  dimmed,
+  busy,
   onSelect,
 }: {
   project: Project;
   selected: boolean;
   opening: boolean;
-  dimmed: boolean;
+  busy: boolean;
   onSelect: () => void;
 }) {
   const tipId = `project-tip-${project.id}`;
@@ -59,12 +59,13 @@ function TileCard({
     <button
       type="button"
       onClick={onSelect}
-      disabled={opening || dimmed}
+      disabled={busy}
       aria-pressed={selected}
       aria-describedby={tipId}
+      title={`${project.name} — ${tooltipFresh(project).replace(/^Last updated: /, "edited ")}`}
       className={`group relative flex h-[191px] w-[273px] shrink-0 flex-col rounded-[16px] bg-[#1d1d1d] text-left outline-none transition focus-visible:ring-2 focus-visible:ring-white/70 ${
         selected ? "ring-2 ring-white/70" : ""
-      } ${dimmed && !opening ? "opacity-40" : ""} disabled:cursor-wait`}
+      } disabled:cursor-wait`}
     >
       <span className="relative block h-[137px] w-[273px] overflow-hidden rounded-t-[16px]">
         <span
@@ -158,11 +159,14 @@ export default function GalleryBoard() {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (cancel?: { cancelled: boolean }) => {
     setLoadError("");
     try {
-      setProjects(await fetchProjects());
+      const next = await fetchProjects();
+      if (cancel?.cancelled) return;
+      setProjects(next);
     } catch (err) {
+      if (cancel?.cancelled) return;
       setProjects([]);
       setLoadError(err instanceof Error ? err.message : "Could not reach the harness. Start it on :5173, then retry.");
     }
@@ -171,28 +175,12 @@ export default function GalleryBoard() {
   // Initial scan on mount. State lands only from the async continuation
   // (never synchronously in setup) with cancellation on unmount.
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const result = await fetchProjects().then(
-        (projects) => ({ ok: true as const, projects }),
-        (error: unknown) => ({ ok: false as const, error }),
-      );
-      if (cancelled) return;
-      if (result.ok) {
-        setProjects(result.projects);
-      } else {
-        setProjects([]);
-        setLoadError(
-          result.error instanceof Error
-            ? result.error.message
-            : "Could not reach the harness. Start it on :5173, then retry.",
-        );
-      }
-    })();
+    const cancel = { cancelled: false };
+    void load(cancel);
     return () => {
-      cancelled = true;
+      cancel.cancelled = true;
     };
-  }, []);
+  }, [load]);
 
   const select = async (project: Project) => {
     if (openingId !== null) return;
@@ -219,6 +207,17 @@ export default function GalleryBoard() {
   const safePage = Math.min(page, pages);
   // First tile is always the create entry (HiFi); project tiles paginate.
   const tiles = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const busy = openingId !== null;
+  const renderTile = (p: Project) => (
+    <TileCard
+      key={p.id}
+      project={p}
+      selected={p.id === selectedId}
+      opening={p.id === openingId}
+      busy={busy}
+      onSelect={() => void select(p)}
+    />
+  );
   const count = filtered.length;
   const countLabel =
     projects === null
@@ -268,29 +267,11 @@ export default function GalleryBoard() {
             <>
               <div className="flex gap-[32px]">
                 <CreateCard />
-                {tiles.slice(0, 3).map((p) => (
-                  <TileCard
-                    key={p.id}
-                    project={p}
-                    selected={p.id === selectedId}
-                    opening={p.id === openingId}
-                    dimmed={openingId !== null}
-                    onSelect={() => void select(p)}
-                  />
-                ))}
+                {tiles.slice(0, 3).map(renderTile)}
               </div>
               {tiles.length > 3 && (
                 <div className="flex gap-[32px]" style={{ marginTop: 24 }}>
-                  {tiles.slice(3).map((p) => (
-                    <TileCard
-                      key={p.id}
-                      project={p}
-                      selected={p.id === selectedId}
-                      opening={p.id === openingId}
-                      dimmed={openingId !== null}
-                      onSelect={() => void select(p)}
-                    />
-                  ))}
+                  {tiles.slice(3).map(renderTile)}
                 </div>
               )}
             </>
