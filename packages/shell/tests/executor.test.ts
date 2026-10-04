@@ -203,7 +203,8 @@ describe("executor", () => {
     if (res.ok) return;
     assert.equal(res.code, "build-failed");
     assert.match(res.message, /retry-exhausted/);
-    assert.equal(calls, POLICY.MAX_RETRIES + 1);
+    assert.match(res.message, /unchanged file twice/);
+    assert.equal(calls, 2); // one guided retry, then fail fast (was MAX_RETRIES + 1)
     const labels = (await git.history()).map((s) => s.label);
     assert.deepEqual(labels, ["gaze: initial"]); // only the auto baseline; the failed edit committed nothing
   });

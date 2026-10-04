@@ -122,6 +122,9 @@ export async function submitEdit(
   // commit per applied edit. Undo steps the branch tip back one commit.
 
   let lastError: string | null = null;
+  // Identical rewrites observed: a model that returns the file unchanged
+  // twice cannot see the requested change (not a transient miss).
+  let identicalCount = 0;
   for (let attempt = 0; attempt <= POLICY.MAX_RETRIES; attempt++) {
     let nextText: string | null = null;
 
@@ -155,7 +158,15 @@ export async function submitEdit(
         } else if (diff === original) {
           // A generated diff that changes nothing is a model miss, not an
           // apply (Tier-1 keeps its idempotent no-ops; the model path must
-          // move pixels). Error-fed retry gives it one guided second chance.
+          // move pixels). One guided second chance, then fail fast: further
+          // attempts just burn ~1s of model latency each for the same miss.
+          identicalCount += 1;
+          if (identicalCount >= 2) {
+            return envelopeFail(
+              `retry-exhausted after ${attempt + 1} attempt(s): model returned an unchanged file twice — ` +
+                "it cannot see the requested change; rephrase the ask or pick another element",
+            );
+          }
           lastError =
             "generated file is identical to the current file: the requested change is not in it; " +
             "re-read the target element and apply the edit";
