@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { IdeaPrompt, PILL_OUTER_CLASS, PILL_TAB_CLASS, promptStateFor } from "./idea-prompt";
 import LookToSpeak from "./look-to-speak";
 import { generateProject } from "../lib/projects";
+import { startAudioCapture, transcribeAudio, type AudioCapture } from "../lib/audio-record";
 import { projectHref } from "../project-url";
 
 const SILENCE_MS = 4500;
@@ -105,6 +106,8 @@ export default function VoicePrompt() {
       } catch {
         // Already stopped.
       }
+      captureRef.current?.discard();
+      captureRef.current = null;
       try {
         const active = await generateProject(text);
         router.push(projectHref(active.name, active.previewUrl));
@@ -116,16 +119,60 @@ export default function VoicePrompt() {
     [clearSilenceTimer, router, setPhase],
   );
 
-  // Silence gate: every transcript update restarts the 4.5s clock.
+  // Parallel capture for the Scribe fallback (proven workspace pattern):
+  // recording runs alongside browser speech from the moment listening
+  // starts and is consumed ONLY when speech produced no transcript.
+  const captureRef = useRef<AudioCapture | null>(null);
+
+  // Silence gate: every transcript update restarts the 4.5s clock. Fires
+  // with the spoken text, or empty when speech produced nothing (the
+  // Scribe path transcribes the parallel capture instead).
+  const submitWithAudio = useCallback(
+    async (brief: string) => {
+      const text = brief.trim();
+      if (text.length >= 3) {
+        await submit(text);
+        return;
+      }
+      const capture = captureRef.current;
+      // eslint-disable-next-line react-hooks/immutability -- async-callback handoff, never render-phase
+      captureRef.current = null;
+      const blob = await capture?.stop();
+      if (!blob) {
+        const reason = capture?.error ? ` (recorder: ${capture.error})` : "";
+        setPhase("error");
+        setFailure(`Heard nothing${reason} — type in the box, then send`);
+        return;
+      }
+      try {
+        const fallback = await transcribeAudio(blob);
+        if (!fallback.trim()) {
+          setPhase("error");
+          setFailure("Heard nothing — type in the box, then send");
+          return;
+        }
+        textRef.current = fallback;
+        setTranscript(fallback);
+        await submit(fallback);
+      } catch (err) {
+        setPhase("error");
+        setFailure(
+          `scribe fallback failed (${err instanceof Error ? err.message : String(err)}) — type in the box, then send`,
+        );
+      }
+    },
+    [submit, setPhase],
+  );
+
   useEffect(() => {
     if (phase.current !== "listening" || textRef.current.trim().length === 0) return;
     clearSilenceTimer();
     const snapshot = textRef.current;
     silenceTimer.current = setTimeout(() => {
-      void submit(snapshot);
+      void submitWithAudio(snapshot);
     }, SILENCE_MS);
     return clearSilenceTimer;
-  }, [transcript, clearSilenceTimer, submit]);
+  }, [transcript, clearSilenceTimer, submitWithAudio]);
 
   // Voice lifecycle. The recognizer is created on mount but only STARTED on
   // user intent (pill click, gaze dwell, retry): autostarting on page load
@@ -202,6 +249,8 @@ export default function VoicePrompt() {
     // no-speech errors into an instant failure screen.)
     return () => {
       recognition.current = null;
+      captureRef.current?.discard();
+      captureRef.current = null;
       try {
         rec.stop();
       } catch {
@@ -221,12 +270,31 @@ export default function VoicePrompt() {
     setDenied(false);
     setPhase("listening");
     setFailure("");
+    // Parallel Scribe capture (proven workspace pattern): best-effort audio
+    // alongside speech, consumed only when speech yields no transcript.
+    captureRef.current?.discard();
+    void startAudioCapture().then(
+      (capture) => {
+        if (phase.current === "listening") captureRef.current = capture;
+        else capture.discard();
+      },
+      () => {
+        // Setup failed — speech/typed paths are unaffected.
+      },
+    );
+    // Arm the gate for the empty-box case too: quiet room + dead recognizer
+    // still falls through to the capture instead of waiting forever. Any
+    // transcript update re-arms with the spoken text.
+    clearSilenceTimer();
+    silenceTimer.current = setTimeout(() => {
+      void submitWithAudio(textRef.current);
+    }, SILENCE_MS);
     try {
       rec.start();
     } catch {
       // Already running — interim results will flow.
     }
-  }, [ensureRecognition, setPhase]);
+  }, [clearSilenceTimer, ensureRecognition, setPhase, submitWithAudio]);
 
   const retry = useCallback(() => {
     if (textRef.current.trim().length >= 3) {
