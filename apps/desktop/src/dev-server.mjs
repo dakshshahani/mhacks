@@ -26,6 +26,7 @@ import {
   PipelineMachine,
   createJevLayer,
   generateNarrowDiff,
+  generateScaffold,
   verifyDecision,
   chooseFile,
 } from "@mhacks/orchestrator";
@@ -775,8 +776,92 @@ async function openProject(name) {
 // handles); only ONE dev server runs at a time (single-active).
 // ---------------------------------------------------------------------------
 
-const projectContexts = new Map();
+// ---------------------------------------------------------------------------
+// Generate-from-brief (voice-to-project): scaffold a zero-dep static site
+// from a spoken prompt via the scaffold model, then supervise it through the
+// same openProject path as gallery projects. Name rules mirror the
+// frontend's validProjectName so generated slugs route cleanly to /{project}.
+// ---------------------------------------------------------------------------
 
+const RESERVED_PROJECT_NAMES = new Set([
+  "projects",
+  "pricing",
+  "about",
+  "account",
+  "api",
+  "harness",
+  ".",
+  "..",
+]);
+const STOPWORDS = new Set(
+  "a,an,the,my,our,your,for,with,and,or,of,to,in,on,at,from,by,please,make,me,us,just,like,want,need,build,create,site,website,web,app,page".split(","),
+);
+
+/** Derive a routable slug from the brief (or explicit hint). Dedupes against
+ *  existing dirs with -2/-3 suffixes. Throws on unusable input. */
+async function allocateProjectSlug(prompt, nameHint) {
+  const source = typeof nameHint === "string" && nameHint.trim().length > 0 ? nameHint : prompt;
+  const words = source
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/[\s-]+/)
+    .filter((w) => w.length > 1 && !STOPWORDS.has(w))
+    .slice(0, 4);
+  let base = words.join("-").slice(0, 40).replace(/^-+|-+$/g, "");
+  if (!base) base = "idea";
+  if (RESERVED_PROJECT_NAMES.has(base)) base = `idea-${base}`;
+  let slug = base;
+  for (let n = 2; n < 100; n++) {
+    const taken = await stat(join(PROJECTS_ROOT, slug))
+      .then((st) => st.isDirectory())
+      .catch(() => false);
+    if (!taken) return slug;
+    slug = `${base}-${n}`.slice(0, 80);
+  }
+  throw new Error("could not allocate a project name — try a different idea");
+}
+
+let generatingProject = null; // in-flight generate slug (transport-owned exclusion)
+
+/** Async job store: generations outlive the 30s Next rewrite proxy, so the
+ *  route returns a jobId immediately and the frontend polls status. */
+let generateSeq = 0;
+const generateJobs = new Map(); // jobId -> { state, name, value, message }
+
+/** Worker: scaffold + supervise an already-allocated slug. The route owns
+ *  validation, allocation, and the in-flight guard — this never re-checks. */
+async function runGeneration(slug, prompt) {
+  console.log(`[projects] generate "${slug}" from brief (${prompt.trim().length} chars)`);
+  const files = await generateScaffold(prompt, slug, {
+    logger: console,
+    timeoutMs: 250000,
+  });
+  if (!files) {
+    throw new Error(
+      "the generator came back empty — check GLM_API_KEY and try again",
+    );
+  }
+  const root = join(PROJECTS_ROOT, slug);
+  await mkdir(root, { recursive: true });
+  for (const f of files) {
+    const content = f.path === "package.json" ? scaffoldPackageJson(slug) : f.content;
+    await writeFile(join(root, f.path), content, "utf8");
+  }
+  return openProject(slug);
+}
+
+/** package.json is harness-shaped, not model-shaped: the dev script must boot
+ *  under `pnpm dev --port` supervision, so the name/dev fields are pinned
+ *  here instead of trusting model output. */
+function scaffoldPackageJson(slug) {
+  return JSON.stringify(
+    { name: slug, private: true, type: "module", scripts: { dev: "node server.mjs" } },
+    null,
+    2,
+  );
+}
+
+const projectContexts = new Map();
 async function projectContextFor(name) {
   let ctx = projectContexts.get(name);
   if (ctx) return ctx;
@@ -1253,6 +1338,65 @@ const server = createServer(async (req, res) => {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/projects/generate") {
+    try {
+      const body = await readJson(req);
+      const prompt = typeof body.prompt === "string" ? body.prompt : "";
+      if (prompt.trim().length < 3) {
+        throw new Error("describe your idea first — a few words is enough");
+      }
+      if (generatingProject !== null) {
+        throw Object.assign(new Error(`already generating "${generatingProject}"`), { status: 409 });
+      }
+      const nameHint = typeof body.name === "string" ? body.name : undefined;
+      const slug = await allocateProjectSlug(prompt, nameHint);
+      const jobId = `gen-${Date.now().toString(36)}-${(generateSeq += 1)}`;
+      generatingProject = slug;
+      generateJobs.set(jobId, { state: "generating", name: slug, value: null, message: null });
+      console.log(`[projects] generate job ${jobId} for "${slug}"`);
+      void (async () => {
+        try {
+          const opened = await runGeneration(slug, prompt);
+          generateJobs.set(jobId, {
+            state: "ready",
+            name: opened.name,
+            value: opened,
+            message: null,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.log(`[projects] generate job ${jobId} failed: ${message}`);
+          generateJobs.set(jobId, { state: "failed", name: slug, value: null, message });
+        } finally {
+          if (generatingProject === slug) generatingProject = null;
+        }
+      })();
+      sendJson(res, 200, { ok: true, value: { jobId, name: slug } });
+    } catch (err) {
+      const status = err && typeof err.status === "number" ? err.status : 200;
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`[projects] generate failed: ${message}`);
+      sendJson(res, status, {
+        ok: false,
+        code: "unknown",
+        message,
+      });
+    }
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/projects/generate/status") {
+    const job = generateJobs.get(url.searchParams.get("jobId") ?? "");
+    if (!job) {
+      sendJson(res, 200, {
+        ok: false,
+        code: "unknown",
+        message: "unknown generation job — submit again",
+      });
+      return;
+    }
+    sendJson(res, 200, { ok: true, value: job });
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/events") {
