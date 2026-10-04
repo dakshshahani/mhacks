@@ -1,4 +1,5 @@
-// Flow 3 back navigation: arrow + label, Jost 16px.
+// Flow 3 back navigation (Hifi "Back to Projects / Starting Points button"
+// instances): 38px glass pill, arrow + 16px label.
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
@@ -6,7 +7,7 @@ export default function BackLink({ href, label }: { href: string; label: string 
   return (
     <Link
       href={href}
-      className="inline-flex items-center gap-[10px] text-[16px] font-normal leading-[23px] text-[#f5f7f7] transition-opacity hover:opacity-75"
+      className="inline-flex h-[38px] items-center gap-[10px] rounded-full bg-[#1d1d1d]/80 py-0 pl-[14px] pr-[20px] text-[16px] font-normal leading-[23px] text-[#f5f7f7] shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px] transition-opacity hover:opacity-85"
     >
       <ArrowLeft size={18} aria-hidden />
       {label}

@@ -523,42 +523,86 @@ function frameworkOf(pkg) {
   return "Node";
 }
 
-/** Live scan of PROJECTS_ROOT. Lists only runnable dirs: package.json with a
- *  non-empty `dev` script. Everything else is hidden, never greyed out. */
+/** Live scan of PROJECTS_ROOT. Lists EVERY non-hidden directory (top level
+ *  plus one level down, flattened as `Parent/child`) — nothing is hidden.
+ *  Each entry carries `runnable` (package.json + non-empty `dev` script);
+ *  only runnable entries can be opened (the supervisor pins `pnpm dev`).
+ *  Display and execution stay separate gates: the scan never hides, the
+ *  open path in resolveProjectRoot still enforces. */
 async function scanProjects() {
-  const entries = await readdir(PROJECTS_ROOT, { withFileTypes: true });
   const out = [];
+  const entries = await readdir(PROJECTS_ROOT, { withFileTypes: true });
   for (const e of entries) {
     if (!e.isDirectory()) continue;
-    if (e.name.startsWith(".")) continue;
-    const root = join(PROJECTS_ROOT, e.name);
-    let pkg;
+    if (e.name.startsWith(".") || e.name === "node_modules") continue;
+    await collectProjectDir(e.name, out);
+    // Descend one level ONLY into containers (no package.json of their own,
+    // e.g. React/thinking-in-react) — never into real projects or their
+    // node_modules, or every dependency would list as a project.
+    let isContainer = true;
     try {
-      pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+      await stat(join(PROJECTS_ROOT, e.name, "package.json"));
+      isContainer = false;
     } catch {
-      continue;
+      isContainer = true;
     }
-    const dev = pkg?.scripts?.dev;
-    if (typeof dev !== "string" || dev.trim().length === 0) continue;
-    let mtimeMs = 0;
+    if (!isContainer) continue;
+    let sub = null;
     try {
-      mtimeMs = (await stat(root)).mtimeMs;
+      sub = await readdir(join(PROJECTS_ROOT, e.name), { withFileTypes: true });
     } catch {
-      // Leave 0 — purely display data, never blocks listing.
+      sub = null;
     }
-    out.push({ name: e.name, path: root, framework: frameworkOf(pkg), mtimeMs });
+    if (!sub) continue;
+    for (const s of sub) {
+      if (!s.isDirectory()) continue;
+      if (s.name.startsWith(".") || s.name === "node_modules") continue;
+      await collectProjectDir(`${e.name}/${s.name}`, out);
+    }
   }
   out.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return out;
 }
 
-/** Resolve a gallery name to its project root. Throws on anything that is
- *  not a directly-scanned runnable child (traversal + scope guard). */
+async function collectProjectDir(rel, out) {
+  const root = join(PROJECTS_ROOT, rel);
+  let pkg = null;
+  try {
+    pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  } catch {
+    pkg = null;
+  }
+  const dev = pkg?.scripts?.dev;
+  const runnable = typeof dev === "string" && dev.trim().length > 0;
+  let mtimeMs = 0;
+  try {
+    mtimeMs = (await stat(root)).mtimeMs;
+  } catch {
+    // Leave 0 — purely display data, never blocks listing.
+  }
+  out.push({
+    name: rel,
+    path: root,
+    framework: pkg ? frameworkOf(pkg) : "Folder",
+    mtimeMs,
+    runnable,
+  });
+}
+
+/** Resolve a gallery name to its project root. Names are top-level dirs or
+ *  single-level `Parent/child` rels from the scan. Traversal + scope guard:
+ *  normalize must round-trip and the root must stay inside PROJECTS_ROOT
+ *  (so `..` can never escape, nested or not). */
 async function resolveProjectRoot(name) {
-  if (typeof name !== "string" || name.length === 0 || name.length > 120) {
+  if (typeof name !== "string" || name.length === 0 || name.length > 160) {
     throw new Error("unknown project");
   }
-  if (name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+  const parts = name.split("/");
+  if (
+    parts.length > 2 ||
+    parts.some((p) => p.length === 0 || p === "." || p === "..") ||
+    name.includes("\\")
+  ) {
     throw new Error("unknown project");
   }
   const root = normalize(join(PROJECTS_ROOT, name));

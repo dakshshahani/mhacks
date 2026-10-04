@@ -3,12 +3,16 @@ import { localhostPreview, validProjectName } from '../project-url';
 import { notFound } from 'next/navigation';
 
 export default async function ProjectPage({ params, searchParams }: {
-  params: Promise<{ projectname: string }>;
+  params: Promise<{ projectname: string[] }>;
   searchParams: Promise<{ preview?: string | string[] }>;
 }) {
-  const { projectname: encodedName } = await params;
+  const { projectname: encodedParts } = await params;
   let projectname: string;
-  try { projectname = decodeURIComponent(encodedName); } catch { notFound(); }
+  try {
+    projectname = encodedParts.map((part) => decodeURIComponent(part)).join("/");
+  } catch {
+    notFound();
+  }
   if (!validProjectName(projectname)) notFound();
   const { preview } = await searchParams;
   let address = '';

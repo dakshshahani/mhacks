@@ -63,13 +63,13 @@ export default function SiteHeader() {
             </a>
           ))}
         </div>
-        <a
+        <Link
           href="/account"
           aria-label="Account"
           className="flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px] transition-opacity hover:opacity-85"
         >
           <UserIcon />
-        </a>
+        </Link>
       </nav>
     </header>
   );

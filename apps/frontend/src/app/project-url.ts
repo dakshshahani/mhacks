@@ -9,9 +9,32 @@ export function localhostPreview(value: string): string {
   return url.href;
 }
 
+const RESERVED = [
+  "projects",
+  "pricing",
+  "about",
+  "account",
+  "api",
+  "harness",
+  "gallery",
+  "new",
+  "import",
+  "edit",
+  ".",
+  "..",
+];
+
+/** Flat names plus single-level `Parent/child` rels from the scan. Slashes
+ *  beyond one, empty segments, and reserved words in ANY segment are out —
+ *  nested "api/…" would otherwise route into Next's /api tree. */
 export function validProjectName(name: string): boolean {
-  return Boolean(name.trim()) && name.length <= 80 && !/[\/\\]/.test(name) &&
-    !['projects', 'pricing', 'about', 'account', 'api', 'harness', '.', '..'].includes(name.toLowerCase());
+  const project = name.trim();
+  if (!project || project.length > 80 || project.includes("\\")) return false;
+  const parts = project.split("/");
+  if (parts.length > 2) return false;
+  if (parts.some((p) => p.length === 0)) return false;
+  if (parts.some((p) => RESERVED.includes(p.toLowerCase()))) return false;
+  return true;
 }
 
 export function projectHref(name: string, preview: string): string {
@@ -19,5 +42,9 @@ export function projectHref(name: string, preview: string): string {
   if (!validProjectName(project)) {
     throw new Error('Choose a project name other than a reserved page name.');
   }
-  return `/${encodeURIComponent(project)}?preview=${encodeURIComponent(localhostPreview(preview))}`;
+  const path = project
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `/${path}?preview=${encodeURIComponent(localhostPreview(preview))}`;
 }
