@@ -1,10 +1,10 @@
 // Gaze probe (injected into proxied foreign pages by the harness).
 // Plain JS, no imports. Runs INSIDE the project's own page and reports out:
 // - click capture -> parent.postMessage({type:"preview-frame", x, y, frame})
-// - window.__gazeProbe.queryElementAt(x, y) -> GazeFrame (same shape the
+// - window.__gazeProbe.queryElementAt(x, y, radiusPx) -> GazeFrame (same shape the
 //   harness stub returns for demo, so Dev B consumes both identically).
-// filePath is ALWAYS null here: foreign pages carry no data-source stamps.
-// The harness resolves componentName -> file server-side (hybrid finder).
+// data-source stamps are retained for the local demo; foreign frames are
+// sanitized server-side and resolved through the hybrid finder.
 // JSON-safe output only: no DOM nodes, functions, or Maps cross the boundary.
 
 (function () {
@@ -116,6 +116,14 @@
     return out;
   }
 
+  function sourceInfo(el) {
+    var raw = el.getAttribute && el.getAttribute("data-source");
+    if (!raw) return { filePath: null, sourceLine: null };
+    var match = String(raw).match(/^([^:]+):([0-9]+)(?::[0-9]+)?$/);
+    if (!match) return { filePath: null, sourceLine: null };
+    return { filePath: match[1].slice(0, 240), sourceLine: Number(match[2]) || null };
+  }
+
   function toCandidate(el, i) {
     var r = el.getBoundingClientRect();
     var html = "";
@@ -131,11 +139,12 @@
       var p = el.parentElement;
       if (p && p !== document.body) context = (p.outerHTML || "").slice(0, 1200);
     } catch (e) { /* detached */ }
+    var source = sourceInfo(el);
     return {
       id: "c" + i,
       selector: cheapSelector(el),
-      componentName: fiberName(el),
-      filePath: null,
+      componentName: el.getAttribute("data-component") || fiberName(el),
+      filePath: source.filePath,
       boundingRect: {
         x: Math.round(r.x), y: Math.round(r.y),
         width: Math.round(r.width), height: Math.round(r.height),
@@ -147,43 +156,78 @@
       trackedConfidence: 0.9,
       supportedOps: supportedOps(el),
       screenshotCrop: null,
-      sourceLine: null,
+      sourceLine: source.sourceLine,
     };
   }
 
-  function queryElementAt(x, y) {
+  function distanceToRect(x, y, r) {
+    var dx = Math.max(r.left - x, 0, x - r.right);
+    var dy = Math.max(r.top - y, 0, y - r.bottom);
+    return Math.hypot(dx, dy);
+  }
+
+  // Deterministic document order (never confidence order — ordering is part
+  // of the decision input). DOCUMENT_POSITION_FOLLOWING = 4: a precedes b.
+  function docOrder(a, b) {
+    if (a === b) return 0;
+    var pos = a.compareDocumentPosition(b);
+    return (pos & 4) ? -1 : 1;
+  }
+
+  function addCandidate(seen, cands, el) {
+    var snapped = snapUp(el);
+    if (!snapped || seen.indexOf(snapped) >= 0 || !isVisible(snapped)) return;
+    seen.push(snapped);
+    cands.push(snapped);
+  }
+
+  function queryElementAt(x, y, radiusPx) {
+    var radius = Number.isFinite(radiusPx) ? Math.max(0, radiusPx) : 0;
     var hits = [];
     try {
       hits = document.elementsFromPoint(x, y) || [];
     } catch (e) {
       hits = [];
     }
+    // Exact hits first: the element under the point is the gaze target even
+    // when a head-tracking radius sweep floods the pool — truncation below
+    // must never drop it in favor of shallow nearby containers.
     var seen = [];
-    var cands = [];
-    for (var i = 0; i < hits.length && cands.length < MAX_CANDIDATES; i++) {
-      var snapped = snapUp(hits[i]);
-      if (!snapped) continue;
-      // Identity dedupe by scan (n is tiny). NOTE: never key an object by
-      // the node — every div stringifies to the same key.
-      var dup = false;
-      for (var d = 0; d < seen.length; d++) {
-        if (seen[d] === snapped) { dup = true; break; }
+    var exact = [];
+    for (var i = 0; i < hits.length; i++) addCandidate(seen, exact, hits[i]);
+    var nearby = [];
+    if (radius > 0 && exact.length < MAX_CANDIDATES) {
+      var all = document.querySelectorAll("body *");
+      for (var n = 0; n < all.length && exact.length + nearby.length < 80; n++) {
+        var candidate = snapUp(all[n]);
+        if (!candidate || seen.indexOf(candidate) >= 0 || !isVisible(candidate)) continue;
+        var dist = distanceToRect(x, y, candidate.getBoundingClientRect());
+        if (dist <= radius) {
+          seen.push(candidate);
+          nearby.push({ node: candidate, dist: dist });
+        }
       }
-      if (dup) continue;
-      seen.push(snapped);
-      if (!isVisible(snapped)) continue;
-      cands.push(snapped);
     }
-    // Deterministic document order (never confidence order — ordering is
-    // part of the decision input).
-    cands.sort(function (a, b) {
-      if (a === b) return 0;
-      var pos = a.compareDocumentPosition(b);
-      // DOCUMENT_POSITION_FOLLOWING = 4: a precedes b.
-      return (pos & 4) ? -1 : 1;
+    // Deterministic order within each group (never confidence order —
+    // ordering is part of the decision input). Exact hits keep DOM order;
+    // when the exact stack itself exceeds the cap the shallow end drops so
+    // the gazed element (deepest) always survives. Nearby fills remaining
+    // slots nearest-first, DOM order breaking distance ties.
+    exact.sort(docOrder);
+    nearby.sort(function (a, b) {
+      if (a.dist !== b.dist) return a.dist - b.dist;
+      return docOrder(a.node, b.node);
     });
+    var picked = exact.slice(Math.max(0, exact.length - MAX_CANDIDATES));
+    for (var k = 0; k < nearby.length && picked.length < MAX_CANDIDATES; k++) {
+      picked.push(nearby[k].node);
+    }
+    // Back to document order before emitting: lock-on (deepest containing
+    // wins the reverse scan) and every downstream consumer assume
+    // shallowest-first.
+    picked.sort(docOrder);
     var out = [];
-    for (var j = 0; j < cands.length; j++) out.push(toCandidate(cands[j], j));
+    for (var j = 0; j < picked.length; j++) out.push(toCandidate(picked[j], j));
     // Deepest containing candidate wins lock-on (parents contain children,
     // so the last DOM-order match is the most specific).
     var locked = null;
@@ -194,8 +238,43 @@
         break;
       }
     }
+    if (!locked && out.length > 0) {
+      var best = 0;
+      var bestDistance = Infinity;
+      for (var q = 0; q < out.length; q++) {
+        var cr = out[q].boundingRect;
+        var distance = distanceToRect(x, y, {
+          left: cr.x, top: cr.y, right: cr.x + cr.width, bottom: cr.y + cr.height,
+        });
+        if (distance < bestDistance) {
+          best = q;
+          bestDistance = distance;
+        }
+      }
+      locked = out[best];
+    }
     return { candidates: out, lockedTarget: locked, capturedAt: Date.now() };
   }
+
+  window.addEventListener("message", function (event) {
+    var message = event.data;
+    if (!message || message.type !== "gaze-query" || event.source !== parent) return;
+    var frame;
+    try {
+      frame = queryElementAt(Number(message.x), Number(message.y), Number(message.radiusPx));
+    } catch (err) {
+      frame = { candidates: [], lockedTarget: null, capturedAt: Date.now() };
+    }
+    try {
+      parent.postMessage({
+        type: "preview-gaze-frame",
+        requestId: message.requestId,
+        x: Number(message.x),
+        y: Number(message.y),
+        frame: frame,
+      }, "*");
+    } catch (err) { /* detached frame */ }
+  });
 
   // Click capture: the workspace learns WHAT was hit at click time (component
   // name + file candidates come later server-side). Capture phase so app
@@ -205,7 +284,7 @@
     function (e) {
       var frame;
       try {
-        frame = queryElementAt(e.clientX, e.clientY);
+        frame = queryElementAt(e.clientX, e.clientY, 0);
       } catch (err) {
         frame = { candidates: [], lockedTarget: null, capturedAt: Date.now() };
       }

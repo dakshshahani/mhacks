@@ -1,7 +1,9 @@
-// Browser-harness client (plain JS — no TS, no imports).
+// Browser-harness client (plain JS).
 // Thin client over the ipc.ts contract + the pipeline SSE stream. No decision
 // logic here: intent/target/route arrive from Dev B via the server, which runs
 // decideAndEdit (Jev -> composeEditRequest -> agent:submitEdit) in Node.
+
+import { createGazeController } from "./gaze/controller.js";
 
 const statusEl = document.querySelector("#status");
 const micEl = document.querySelector("#mic");
@@ -19,20 +21,42 @@ function previewFrame() {
 }
 
 // Cache-busting preview reload. location.reload() may repaint from the HTTP
-// cache (observed: status says Done, pixels don't move); reassigning src
-// with a fresh query param forces a new document every time.
+// cache (observed: status says Done, pixels never move); reassigning src
+// with a fresh query param forces a new document every time. Wrapped in a
+// View Transition when the browser supports it so the old pixels ease into
+// the new ones (see globals.css for the cubic curve) instead of flashing.
 function reloadPreview() {
   const f = previewFrame();
   if (!f || !f.src) return;
-  try {
-    f.src = `${f.src.split("?")[0]}?t=${Date.now()}`;
-  } catch {
+  lastFrame = null;
+  lastPoint = null;
+  const swap = () => {
     try {
-      f.contentWindow?.location.reload();
+      f.src = `${f.src.split("?")[0]}?t=${Date.now()}`;
     } catch {
-      // Cross-origin or detached frame — leave the pixels alone.
+      try {
+        f.contentWindow?.location.reload();
+      } catch {
+        // Cross-origin or detached frame — leave the pixels alone.
+      }
     }
+  };
+  if (typeof document.startViewTransition !== "function") {
+    swap();
+    return;
   }
+  document.startViewTransition(async () => {
+    swap();
+    // Settle the transition on the new document, never hang it on a slow one.
+    await new Promise((resolve) => {
+      const done = () => {
+        f.removeEventListener("load", done);
+        resolve();
+      };
+      f.addEventListener("load", done);
+      setTimeout(done, 2000);
+    });
+  });
 }
 
 let undoTimer;
@@ -42,6 +66,7 @@ let lastApplied = null;
 let editStartAt = 0;
 let editTimer;
 let pipeBusy = false;
+let gazeController = null;
 
 /** Send is enabled only when the pipeline is idle AND the box has text —
  *  an empty send can only ever 422 ("empty transcript"), so prevent it at
@@ -111,15 +136,16 @@ export function currentProject() {
   }
 }
 
-// Latest live-probe frame (foreign projects only; demo probes server-side).
-// Sent with the edit request so the server decides on clicked-what, not a
-// stale cache.
+// Latest live-probe frame. Sent with the edit request so the server decides
+// on clicked-what, not a stale cache.
 let lastFrame = null;
 
 export async function decideAndEdit(transcript, x, y) {
   let res;
   const body = { transcript, x, y, project: currentProject() };
-  if (lastFrame && currentProject() !== "demo") body.frame = lastFrame;
+  if (lastFrame && Array.isArray(lastFrame.candidates) && lastFrame.candidates.length > 0) {
+    body.frame = lastFrame;
+  }
   try {
     res = await fetch("/api/decide-and-edit", {
       method: "POST",
@@ -299,6 +325,7 @@ events.onmessage = (e) => {
   if (msg.type === "pipeline") renderPipeline(msg.state);
   else if (msg.type === "speech-state") {
     serverMicState = msg.state;
+    gazeController?.setSpeechState(msg.state);
     setMic(msg.state);
     renderMicButton();
   } else if (msg.type === "speech-transcript" && transcriptEl && !msg.event.isFinal) {
@@ -693,6 +720,7 @@ window.addEventListener("message", (e) => {
       return;
     }
     lastFrame = f;
+    gazeController?.acceptExternalFrame(f, { x: e.data.x, y: e.data.y });
     const locked =
       f.lockedTarget ??
       [...f.candidates]
@@ -780,3 +808,26 @@ window.mhacks = {
   updateSendButton,
   currentProject,
 };
+
+gazeController = createGazeController({
+  onFrame: ({ frame, previewPoint }) => {
+    lastFrame = frame;
+    if (previewPoint) lastPoint = previewPoint;
+    const target = frame.lockedTarget ?? frame.candidates?.at(-1) ?? frame.candidates?.[0] ?? null;
+    if (target && pointEl) {
+      pointEl.textContent = `${target.componentName ?? target.id}${frame.lockedTarget ? " — locked" : ""}`;
+    }
+  },
+  onStatus: (message) => {
+    if (!pipeBusy) setStatus(message);
+  },
+  onInvalidate: () => {
+    // The preview scrolled or reloaded under us: the learned target geometry
+    // is void. Drop it so the next send can't edit a stale element; the next
+    // gaze frame or click re-acquires.
+    lastFrame = null;
+    lastPoint = null;
+    if (pointEl) pointEl.textContent = "Click the preview to select a target";
+  },
+});
+gazeController.start();

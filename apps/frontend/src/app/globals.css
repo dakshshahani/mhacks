@@ -245,6 +245,13 @@ summary::-webkit-details-marker {
   border:0;
   background:white
 }
+/* Post-edit preview swaps run inside a View Transition (see the harness
+   reloadPreview): ease old pixels into new ones instead of flashing. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration:280ms;
+  animation-timing-function:cubic-bezier(.22,1,.36,1)
+}
 .preview-empty {
   flex:1;
   display:flex;
