@@ -65,6 +65,55 @@ export async function fetchProjects(): Promise<Project[]> {
   }));
 }
 
+/** Generate = scaffold a starter site from a spoken brief, then supervise it
+ *  like any gallery project. Generations outlive the 30s Next rewrite proxy,
+ *  so this starts a job and polls status every 2s until ready/failed.
+ *  Resolves with the preview URL to route to. Throws with the harness
+ *  message for the UI to show. */
+export interface GenerationJob {
+  jobId: string;
+  name: string;
+}
+
+export interface GenerationStatus {
+  state: "generating" | "ready" | "failed";
+  name: string;
+  value: ActiveProject | null;
+  message: string | null;
+}
+
+export async function startGeneration(prompt: string): Promise<GenerationJob> {
+  const res = await fetch("/api/projects/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  const body = (await res.json()) as { ok: boolean; value?: GenerationJob } & { message?: string };
+  if (!res.ok || !body.ok || !body.value) throw harnessError("generate", body);
+  return body.value;
+}
+
+export async function generationStatus(jobId: string): Promise<GenerationStatus> {
+  const res = await fetch(`/api/projects/generate/status?jobId=${encodeURIComponent(jobId)}`, {
+    cache: "no-store",
+  });
+  const body = (await res.json()) as { ok: boolean; value?: GenerationStatus } & { message?: string };
+  if (!res.ok || !body.ok || !body.value) throw harnessError("generate status", body);
+  return body.value;
+}
+
+export async function generateProject(prompt: string): Promise<ActiveProject> {
+  const { jobId } = await startGeneration(prompt);
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const status = await generationStatus(jobId);
+    if (status.state === "ready" && status.value) return status.value;
+    if (status.state === "failed") {
+      throw new Error(status.message || "Generation failed.");
+    }
+  }
+}
+
 /** Open = single-active supervisor spawns `pnpm dev` and waits for ready.
  *  Resolves with the preview URL to iframe. Throws with the harness message
  *  (no dev script, install failure, port/spawn failure) for the UI to show. */
