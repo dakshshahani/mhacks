@@ -176,6 +176,10 @@ export function describeOp(req) {
       return `${t}: spacing → ${op.param}`;
     case "set-align":
       return `${t}: align → ${op.param}`;
+    case "set-weight":
+      return `${t}: weight → ${op.param}`;
+    case "set-size":
+      return `${t}: size → ${op.param}`;
     case "hide":
       return `${t}: hidden`;
     case "swap-text":
@@ -185,13 +189,113 @@ export function describeOp(req) {
   }
 }
 
+// History pane: HiFi Prompt containers. First click checks out the snapshot
+// (working tree only, history kept); clicking the checked-out entry again
+// reverts to it and drops everything above it.
+let checkedOutSha = null;
+let toggleBusy = false;
+
+export function clearCheckedOut() {
+  checkedOutSha = null;
+}
+
+function relTime(at) {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (s < 60) return `${s} seconds ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  return `${Math.round(m / 60)} hour${Math.round(m / 60) === 1 ? "" : "s"} ago`;
+}
+
+async function toggleVersion(sha, label) {
+  // One flight at a time: rapid double-clicks must not interleave a checkout
+  // with the revert it was meant to trigger (or vice versa).
+  if (toggleBusy) return;
+  toggleBusy = true;
+  hideFail();
+  try {
+    if (checkedOutSha === sha) {
+      const r = await invoke("git:revertTo", { sha });
+      if (!r.ok) {
+        await staleVersionRecovery(r, sha);
+        return;
+      }
+      checkedOutSha = null;
+      setStatus(`Reverted to ${label} @ ${sha.slice(0, 8)} — newer versions dropped`);
+    } else {
+      const r = await invoke("git:checkout", { sha });
+      if (!r.ok) {
+        await staleVersionRecovery(r, sha);
+        return;
+      }
+      checkedOutSha = sha;
+      setStatus(`Viewing ${label} @ ${sha.slice(0, 8)} — click again to revert here`);
+    }
+    reloadPreview();
+    refreshHistory();
+  } finally {
+    toggleBusy = false;
+  }
+}
+
+/** The pane outlives the store: entries vanish when history is truncated
+ *  elsewhere (a revert in another tab), the snapshot dir is cleaned, or the
+ *  tab was rendered against a different backend than clicks now reach.
+ *  Resync the pane and say so instead of erroring on a ghost. */
+async function staleVersionRecovery(r, sha) {
+  const message = r.message ?? r.code;
+  if (/unknown sha|nothing to restore/i.test(message)) {
+    checkedOutSha = null;
+    setStatus("That version is no longer in history — refreshed the list");
+    await refreshHistory();
+    return;
+  }
+  showFail(message);
+}
+
 export async function refreshHistory() {
   const h = await invoke("git:history", undefined);
   if (!h.ok || !historyEl) return;
   historyEl.innerHTML = "";
-  for (const s of h.value.slice(-8).reverse()) {
+  // Undo markers are bookkeeping, not versions — the pane shows restorable
+  // snapshots newest-first.
+  const versions = h.value.filter((s) => !s.label.startsWith("undo ")).slice(-8).reverse();
+  if (checkedOutSha && !versions.some((s) => s.sha === checkedOutSha)) checkedOutSha = null;
+  for (const s of versions) {
     const li = document.createElement("li");
-    li.textContent = `${new Date(s.at).toLocaleTimeString()} ${s.label} @ ${s.sha.slice(0, 8)}`;
+    li.className = "prompt-card";
+    li.dataset.sha = s.sha;
+    const selected = checkedOutSha === s.sha;
+    if (selected) li.classList.add("is-selected");
+    li.tabIndex = 0;
+    li.setAttribute("role", "button");
+    li.setAttribute(
+      "aria-label",
+      selected ? `Revert to ${s.label}` : `Check out ${s.label}`,
+    );
+    const meta = document.createElement("div");
+    meta.className = "prompt-meta";
+    const label = document.createElement("span");
+    label.className = "prompt-label";
+    label.textContent = s.label;
+    const time = document.createElement("span");
+    time.className = "prompt-time";
+    time.textContent = relTime(s.at);
+    meta.append(label, time);
+    const body = document.createElement("div");
+    body.className = "prompt-body";
+    body.textContent = `${s.label} @ ${s.sha.slice(0, 8)}`;
+    const hint = document.createElement("div");
+    hint.className = "prompt-hint";
+    hint.textContent = selected ? "viewing — click again to revert here" : "click to view this version";
+    li.append(meta, body, hint);
+    li.addEventListener("click", () => void toggleVersion(s.sha, s.label));
+    li.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        void toggleVersion(s.sha, s.label);
+      }
+    });
     historyEl.appendChild(li);
   }
 }
@@ -231,11 +335,12 @@ export async function sendEdit(transcript) {
     return;
   }
   lastApplied = body;
-  const secs = Math.round(body.undoWindowMs / 1000);
-  const flag =
+  clearCheckedOut();
+  const secs = Math.round(body.undoWindowMs / 1000);  const flag =
     body.editRequest.route !== "no-llm" && !body.verified ? " (unverified — check it)" : "";
+  const jevMs = typeof body.decisionMs === "number" ? ` · Jev ${Math.round(body.decisionMs)}ms` : "";
   setStatus(
-    `Done: ${describeOp(body.editRequest)} (${body.editResult.filesChanged.join(", ")} @ ${body.editResult.commitSha.slice(0, 8)}) — undo within ${secs}s to revert${flag}`,
+    `Done: ${describeOp(body.editRequest)} (${body.editResult.filesChanged.join(", ")} @ ${body.editResult.commitSha.slice(0, 8)}) — undo within ${secs}s to revert${flag}${jevMs}`,
   );
   showUndoCircle(body.undoWindowMs);
   reloadPreview();
@@ -275,6 +380,8 @@ function renderPipeline(state) {
     stopEditTimer();
   }
   if (state.stage === "applied" && prevStage !== "applied") {
+    // A new edit landed: any checked-out older version is stale.
+    clearCheckedOut();
     // Edge-triggered from the last /api/decide-and-edit response (which
     // carries undoWindowMs); the event alone re-renders the status line.
     if (lastApplied && state.editId === lastApplied.editRequest.id) {
@@ -692,6 +799,7 @@ document.querySelector("#send")?.addEventListener("click", () => {
 document.querySelector("#new-version")?.addEventListener("click", async () => {
   const r = await invoke("git:createSnapshot", { label: `v${new Date().toLocaleTimeString()}` });
   setStatus(r.ok ? `Version saved @ ${r.value.sha.slice(0, 8)}` : `Version: ${r.message ?? r.code}`);
+  clearCheckedOut();
   refreshHistory();
 });
 
@@ -700,6 +808,7 @@ undoEl?.addEventListener("click", async () => {
   setStatus(r.ok ? `Undone: reverted to pre-edit state (${r.value.sha.slice(0, 8)})` : `Undo: ${r.message ?? r.code}`);
   if (undoEl) undoEl.style.display = "none";
   hideFail();
+  clearCheckedOut();
   reloadPreview();
   refreshHistory();
 });
@@ -794,6 +903,7 @@ window.mhacks = {
   setMic,
   showUndoCircle,
   refreshHistory,
+  clearCheckedOut,
   startWebSpeech,
   stopWebSpeech,
   micOff,

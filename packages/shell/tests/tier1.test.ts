@@ -29,6 +29,25 @@ describe("tier1 renderer", () => {
     assert.doesNotMatch(out, /text-left/);
   });
 
+  it("set-weight swaps font weight without stacking", () => {
+    const out = applyTier1Edit(`<p className="font-normal">x</p>`, { op: "set-weight", param: "bold" });
+    assert.match(out, /font-bold/);
+    assert.doesNotMatch(out, /font-normal/);
+    const twice = applyTier1Edit(`<p className="font-semibold">x</p>`, { op: "set-weight", param: "bold" });
+    assert.match(twice, /font-bold/);
+    assert.doesNotMatch(twice, /font-semibold/);
+    assert.ok(isTier1Executable("set-weight", "bold"));
+    assert.ok(!isTier1Executable("set-weight", "black"));
+  });
+
+  it("set-size swaps text size without stacking", () => {
+    const out = applyTier1Edit(`<p className="text-2xl">x</p>`, { op: "set-size", param: "sm" });
+    assert.match(out, /text-sm/);
+    assert.doesNotMatch(out, /text-2xl/);
+    assert.ok(isTier1Executable("set-size", "lg"));
+    assert.ok(!isTier1Executable("set-size", "huge"));
+  });
+
   it("hide adds hidden once", () => {
     const once = applyTier1Edit(`<div className="hero">x</div>`, { op: "hide", param: null });
     assert.match(once, /hidden/);

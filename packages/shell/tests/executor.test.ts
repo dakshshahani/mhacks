@@ -7,7 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { EditRequest } from "@mhacks/contracts";
 import type { ElementCandidate } from "@mhacks/contracts";
-import { FileGitService } from "../src/git";
+import { GitService } from "../src/git";
 import { submitEdit, shouldRetry, type EditRequestWithParent } from "../src/executor";
 import { POLICY } from "@mhacks/contracts";
 
@@ -61,7 +61,7 @@ function memIO(root: string) {
 describe("executor", () => {
   it("valid Tier-1 request -> applied with real sha/filesChanged, hotReloaded honest", async () => {
     const { root } = await makeRoot();
-    const git = new FileGitService(root);
+    const git = new GitService(root);
     const res = await submitEdit(req(), {
       git,
       ...memIO(root),
@@ -79,7 +79,7 @@ describe("executor", () => {
 
   it("missing filePath -> build-failed envelope, never a wrong file", async () => {
     const { root } = await makeRoot();
-    const git = new FileGitService(root);
+    const git = new GitService(root);
     const res = await submitEdit(req({ target: candidate({ filePath: null }) }), {
       git,
       ...memIO(root),
@@ -91,7 +91,7 @@ describe("executor", () => {
 
   it("broken edit -> build-failed envelope + worktree reverted", async () => {
     const { root } = await makeRoot();
-    const git = new FileGitService(root);
+    const git = new GitService(root);
     let calls = 0;
     const res = await submitEdit(
       req({ op: null, route: "small", target: candidate() }),
@@ -124,7 +124,7 @@ describe("executor", () => {
   });
 
   it("parent address is resolved at apply time (forward-compat §5.4b)", async () => {    const { root } = await makeRoot();
-    const git = new FileGitService(root);
+    const git = new GitService(root);
     let seenParent: string | null = null;
     const res = await submitEdit(
       { ...req({ route: "small" }), parent: { componentName: "Layout", filePath: "Parent.tsx" } } as EditRequestWithParent,
@@ -147,7 +147,7 @@ describe("executor", () => {
 
   it("filePath escape attempts -> build-failed envelope, nothing written outside root", async () => {
     const { root } = await makeRoot();
-    const git = new FileGitService(root);
+    const git = new GitService(root);
     for (const evil of ["../evil.ts", "/abs/evil.ts", "a/../../evil.ts", "sub/../../../evil.ts"]) {
       const res = await submitEdit(req({ target: candidate({ filePath: evil }) }), {
         git,
@@ -165,7 +165,7 @@ describe("executor", () => {
   it("truncated model output -> error-fed retry, then retry-exhausted, file intact", async () => {    const { root } = await makeRoot();
     const big = `<div>\n${"x".repeat(1000)}\n</div>`;
     await fs.writeFile(path.join(root, "Hero.tsx"), big);
-    const git = new FileGitService(root);
+    const git = new GitService(root);
     let calls = 0;
     let seenError = "";
     const res = await submitEdit(req({ op: null, route: "small", intent: "style" }), {
@@ -189,7 +189,7 @@ describe("executor", () => {
   it("identical model output -> no commit, retry-exhausted, file intact", async () => {
     const { root } = await makeRoot();
     const before = await fs.readFile(path.join(root, "Hero.tsx"), "utf8");
-    const git = new FileGitService(root);
+    const git = new GitService(root);
     let calls = 0;
     const res = await submitEdit(req({ op: null, route: "small", intent: "content" }), {
       git,
@@ -203,8 +203,72 @@ describe("executor", () => {
     if (res.ok) return;
     assert.equal(res.code, "build-failed");
     assert.match(res.message, /retry-exhausted/);
-    assert.equal(calls, POLICY.MAX_RETRIES + 1);
+    assert.match(res.message, /unchanged file twice/);
+    assert.equal(calls, 2); // one guided retry, then fail fast (was MAX_RETRIES + 1)
     const labels = (await git.history()).map((s) => s.label);
-    assert.ok(labels.every((l) => !l.startsWith("edit "))); // pre-edit baseline only, no edit committed
+    assert.deepEqual(labels, ["gaze: initial"]); // only the auto baseline; the failed edit committed nothing
+  });
+
+  it("applied edit commits only its own files, not unrelated dirt", async () => {
+    const { root } = await makeRoot();
+    const git = new GitService(root);
+    await fs.writeFile(path.join(root, "Notes.md"), "scratch");
+    const res = await submitEdit(req(), { git, ...memIO(root) });
+    assert.equal(res.ok, true);
+    const { execFile } = await import("node:child_process");
+    const names: string = await new Promise((resolve, reject) => {
+      execFile("git", ["-C", root, "show", "--name-only", "--format=", "HEAD"], (err, out) =>
+        err ? reject(err) : resolve(String(out).trim()),
+      );
+    });
+    assert.equal(names, "Hero.tsx");
+  });
+
+  it("undo after an applied edit restores the file and steps the tip back", async () => {
+    const { root } = await makeRoot();
+    const git = new GitService(root);
+    const res = await submitEdit(req(), { git, ...memIO(root) });
+    assert.equal(res.ok, true);
+    await git.undo();
+    assert.match(await fs.readFile(path.join(root, "Hero.tsx"), "utf8"), /bg-muted/);
+    assert.deepEqual((await git.history()).map((s) => s.label), ["gaze: initial"]);
+  });
+
+  it("edit while viewing an older version lands on latest, keeps hand edits", async () => {
+    const { root } = await makeRoot();
+    const git = new GitService(root);
+    const v1 = await git.createSnapshot("v1");
+    await git.checkout(v1.sha); // detached viewing
+    // Non-conflicting hand edit in another file rides along.
+    await fs.writeFile(path.join(root, "Parent.tsx"), `<main className="flex justify-center" data-hand="1"><slot /></main>`);
+    const res = await submitEdit(req(), { git, ...memIO(root) });
+    assert.equal(res.ok, true);
+    const { execFile } = await import("node:child_process");
+    const branch: string = await new Promise((resolve, reject) => {
+      execFile("git", ["-C", root, "branch", "--show-current"], (err, out) =>
+        err ? reject(err) : resolve(String(out).trim()),
+      );
+    });
+    assert.equal(branch, "main");
+    const hero = await fs.readFile(path.join(root, "Hero.tsx"), "utf8");
+    assert.match(hero, /bg-brand/);
+    assert.match(await fs.readFile(path.join(root, "Parent.tsx"), "utf8"), /data-hand/);
+    assert.deepEqual((await git.history()).map((s) => s.label), ["gaze: initial", "v1", "edit e-1"]);
+  });
+
+  it("conflicting hand edits while detached fail loudly with the stash kept", async () => {
+    const { root } = await makeRoot();
+    const git = new GitService(root);
+    await git.createSnapshot("v1");
+    await fs.writeFile(path.join(root, "Hero.tsx"), `<div className="hero bg-muted">Two</div>`);
+    await git.createSnapshot("v2");
+    await git.checkout((await git.history())[0]?.sha as string);
+    // Same-line hand edit conflicts with the return to tip.
+    await fs.writeFile(path.join(root, "Hero.tsx"), `<div className="hero bg-muted">Mine</div>`);
+    const res = await submitEdit(req(), { git, ...memIO(root) });
+    assert.equal(res.ok, false);
+    if (res.ok) return;
+    assert.equal(res.code, "build-failed");
+    assert.match(res.message, /reattach conflict/);
   });
 });

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { FileGitService } from "../src/git";
+import { GitService } from "../src/git";
 import { PreviewHost } from "../src/preview";
 import { SpeechService } from "../src/speech";
 import { IpcRouter } from "../src/ipcRouter";
@@ -32,7 +32,7 @@ const FRAME: GazeFrame = {
 async function makeRouter() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "mhacks-ipc-"));
   await fs.writeFile(path.join(root, "Hero.tsx"), `<div className="hero">Hello</div>`);
-  const git = new FileGitService(root);
+  const git = new GitService(root);
   const preview = new PreviewHost();
   preview.setProbe(() => Promise.resolve(FRAME), true);
   const speech = new SpeechService([{ kind: "web-speech", isAvailable: () => true }]);
@@ -71,10 +71,40 @@ describe("ipc router", () => {
     const hist = await router.invoke("git:history", undefined);
     assert.equal(hist.ok, true);
     if (!hist.ok) return;
-    assert.equal(hist.value.length, 1);
+    assert.equal(hist.value.length, 2); // gaze: initial + v1
     if (!snap.ok) return;
     const conf = await router.invoke("git:confirm", { sha: snap.value.sha });
     assert.equal(conf.ok, true);
+  });
+
+  it("git checkout views without moving the tip; revertTo drops above", async () => {
+    const { router } = await makeRouter();
+    const v1 = await router.invoke("git:createSnapshot", { label: "v1" });
+    assert.equal(v1.ok, true);
+    if (!v1.ok) return;
+    const v2 = await router.invoke("git:createSnapshot", { label: "v2" });
+    assert.equal(v2.ok, true);
+    if (!v2.ok) return;
+
+    const co = await router.invoke("git:checkout", { sha: v1.value.sha });
+    assert.equal(co.ok, true);
+    const stillTwo = await router.invoke("git:history", undefined);
+    assert.equal(stillTwo.ok, true);
+    if (!stillTwo.ok) return;
+    assert.equal(stillTwo.value.length, 3); // session branch: initial + v1 + v2 (tip untouched)
+
+    const bad = await router.invoke("git:checkout", { sha: "deadbeefdeadbeef" });
+    assert.equal(bad.ok, false);
+
+    const rev = await router.invoke("git:revertTo", { sha: v1.value.sha });
+    assert.equal(rev.ok, true);
+    const after = await router.invoke("git:history", undefined);
+    assert.equal(after.ok, true);
+    if (!after.ok) return;
+    assert.deepEqual(
+      after.value.map((s) => s.label),
+      ["gaze: initial", "v1"],
+    );
   });
 
   it("speech start/stop envelopes", async () => {

@@ -12,6 +12,9 @@ export interface Project {
   framework: string;
   /** Display string ("2h ago"); derived from the root mtime. */
   lastEdited: string;
+  /** Root mtime epoch ms — drives the hover tooltip's freshness copy.
+   *  Absent only for pre-timestamp custom entries (treated as now). */
+  editedAt?: number;
 }
 
 export interface ActiveProject {
@@ -38,9 +41,15 @@ function harnessError(action: string, body: unknown): Error {
   return new Error(`${action} failed: ${message}`);
 }
 
+/** Shared envelope unwrap for the harness IpcResult-shaped routes. */
+function unwrap<T>(action: string, res: Response, body: { ok: boolean; value?: T } & { message?: string }): T {
+  if (!res.ok || !body.ok || body.value === undefined) throw harnessError(action, body);
+  return body.value;
+}
+
 export function relativeEdited(mtimeMs: number): string {
   if (!mtimeMs) return "unknown";
-  const mins = Math.max(0, Math.round((Date.now() - mtimeMs) / 60000));
+  const { mins } = elapsedSince(mtimeMs);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.round(mins / 60);
@@ -48,6 +57,36 @@ export function relativeEdited(mtimeMs: number): string {
   const days = Math.round(hours / 24);
   if (days < 30) return `${days}d ago`;
   return new Date(mtimeMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Shared elapsed breakdown — single Date.now() math for both freshness
+ *  readers so the tile sub-line and tooltip can't drift apart. */
+function elapsedSince(at: number): { secs: number; mins: number; hours: number; days: number } {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
+  const mins = Math.floor(secs / 60);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  return { secs, mins, hours, days };
+}
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+}
+
+/** Hover-tooltip freshness: full unit ladder (seconds → years), always a
+ *  short single line that fits the 273px HiFi card. Mirrors the HiFi tooltip
+ *  ("Last updated: 15 seconds ago"). */
+export function tooltipFresh(project: Project): string {
+  const at = project.editedAt ?? Date.now();
+  const { secs, mins, hours, days } = elapsedSince(at);
+  if (secs < 5) return "Last updated: just now";
+  if (secs < 60) return `Last updated: ${plural(secs, "second")} ago`;
+  if (mins < 60) return `Last updated: ${plural(mins, "minute")} ago`;
+  if (hours < 24) return `Last updated: ${plural(hours, "hour")} ago`;
+  if (days < 7) return `Last updated: ${plural(days, "day")} ago`;
+  if (days < 30) return `Last updated: ${plural(Math.floor(days / 7), "week")} ago`;
+  if (days < 365) return `Last updated: ${plural(Math.floor(days / 30), "month")} ago`;
+  return `Last updated: ${plural(Math.floor(days / 365), "year")} ago`;
 }
 
 /** Live scan — throws on transport error or {ok:false} envelope. */
@@ -62,7 +101,60 @@ export async function fetchProjects(): Promise<Project[]> {
     path: e.path,
     framework: e.framework,
     lastEdited: relativeEdited(e.mtimeMs),
+    editedAt: e.mtimeMs,
   }));
+}
+
+/** Generate = scaffold a starter site from a spoken brief, then supervise it
+ *  like any gallery project. Generations outlive the 30s Next rewrite proxy,
+ *  so this starts a job and polls status every 2s until ready/failed.
+ *  Resolves with the preview URL to route to. Throws with the harness
+ *  message for the UI to show. */
+export interface GenerationJob {
+  jobId: string;
+  name: string;
+}
+
+export interface GenerationStatus {
+  state: "generating" | "ready" | "failed";
+  name: string;
+  value: ActiveProject | null;
+  message: string | null;
+}
+
+export async function startGeneration(prompt: string): Promise<GenerationJob> {
+  const res = await fetch("/api/projects/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  const body = (await res.json()) as { ok: boolean; value?: GenerationJob } & { message?: string };
+  return unwrap("generate", res, body);
+}
+
+export async function generationStatus(jobId: string): Promise<GenerationStatus> {
+  const res = await fetch(`/api/projects/generate/status?jobId=${encodeURIComponent(jobId)}`, {
+    cache: "no-store",
+  });
+  const body = (await res.json()) as { ok: boolean; value?: GenerationStatus } & { message?: string };
+  return unwrap("generate status", res, body);
+}
+
+/** Poll ceiling: 6min at 2s cadence — past that the job is presumed stalled
+ *  and the UI must surface retry instead of spinning forever. */
+const MAX_POLLS = 180;
+
+export async function generateProject(prompt: string): Promise<ActiveProject> {
+  const { jobId } = await startGeneration(prompt);
+  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const status = await generationStatus(jobId);
+    if (status.state === "ready" && status.value) return status.value;
+    if (status.state === "failed") {
+      throw new Error(status.message || "Generation failed.");
+    }
+  }
+  throw new Error("Generation timed out — retry to try again.");
 }
 
 /** Open = single-active supervisor spawns `pnpm dev` and waits for ready.
@@ -113,6 +205,7 @@ export function saveCustomProject(p: { name: string; path: string }): Project {
     path: p.path,
     framework: "React",
     lastEdited: "just now",
+    editedAt: Date.now(),
   };
   if (canStore()) {
     try {

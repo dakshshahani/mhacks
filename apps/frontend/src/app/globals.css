@@ -52,13 +52,57 @@ body {
 .animate-orb-breathe { animation: orb-breathe 9s ease-in-out infinite; }
 .animate-ring-pulse { animation: ring-pulse 5s ease-in-out infinite; }
 
+/* ---- Aurora choreography: slow drifting glows behind the chooser cards ----
+   Small translate/scale ranges on long loops — movement reads as a gentle
+   breathing wash, never a lively bounce. Transform-only for cheap frames. */
+@keyframes aurora-drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(4%, 3%) scale(1.07); }
+}
+@keyframes aurora-drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1.04); }
+  50% { transform: translate(-4%, -2%) scale(0.97); }
+}
+@keyframes aurora-drift-c {
+  0%, 100% { transform: translate(2%, 0) scale(0.98); }
+  50% { transform: translate(-3%, 3%) scale(1.05); }
+}
+
+.animate-aurora-a { animation: aurora-drift-a 26s ease-in-out infinite; }
+.animate-aurora-b { animation: aurora-drift-b 34s ease-in-out infinite; }
+.animate-aurora-c { animation: aurora-drift-c 42s ease-in-out infinite; }
+
+/* ---- Aurora spin + breathe: one slow rotate and one scale/opacity pulse
+   per lobe, each on its own nested element (see components/aurora.tsx) so
+   the three loops never compete for `transform`. Spin is perceptible
+   because every lobe is elliptical; breathe keeps the field luminous
+   without flashing. Transform/opacity-only for cheap frames. */
+@keyframes aurora-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes aurora-breathe {
+  0%, 100% { opacity: 0.72; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+.animate-aurora-spin { animation: aurora-spin 90s linear infinite; }
+.animate-aurora-spin-rev { animation: aurora-spin 110s linear infinite reverse; }
+.animate-aurora-breathe { animation: aurora-breathe 12s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
+  .animate-aurora-a,
+  .animate-aurora-b,
+  .animate-aurora-c,
+  .animate-aurora-spin,
+  .animate-aurora-spin-rev,
+  .animate-aurora-breathe,
   .animate-orb-a,
   .animate-orb-b,
   .animate-orb-c,
   .animate-orb-spin,
   .animate-orb-breathe,
-  .animate-ring-pulse {
+  .animate-ring-pulse,
+  .animate-spin {
     animation: none;
   }
 }
@@ -71,11 +115,44 @@ body {
   color:var(--ink);
   background-color:#0a0a0a
 }
+/* ---- Glass islands over a live viewport ----
+   Every chrome element is a detached island floating above the project
+   viewport — never an attached bar, never a window inside a window.
+   Real glassmorphism (no opaque gray gradients): a translucent white fill
+   so the live project reads through it, backdrop blur + saturation for the
+   frost, a 1px catch-light border for the glass edge, an inset top
+   highlight, and one deep soft shadow. One material, three densities. */
+.glass {
+  background: linear-gradient(135deg, rgb(255 255 255 / .14), rgb(255 255 255 / .05));
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / .18);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .25),
+    inset 0 -1px 0 rgb(0 0 0 / .2),
+    0 8px 32px rgb(0 0 0 / .37);
+}
+.glass-strong {
+  background: linear-gradient(135deg, rgb(30 32 40 / .72), rgb(16 17 23 / .78));
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  border: 1px solid rgb(255 255 255 / .14);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .2),
+    inset 0 -1px 0 rgb(0 0 0 / .25),
+    0 16px 48px rgb(0 0 0 / .5);
+}
+/* Legacy class kept for compat (voice dock, undo circle, dialogs, menus):
+   now the same real glass instead of the old gray gradient. */
 .workspace-glass {
-  background:linear-gradient(145deg,rgb(79 83 97 / .35),rgb(25 26 31 / .94));
-  border:1px solid var(--stroke);
-  box-shadow:inset 0 1px 0 rgb(255 255 255 / .12),0 12px 35px rgb(0 0 0 / .2);
-  backdrop-filter:blur(40px)
+  background: linear-gradient(135deg, rgb(255 255 255 / .14), rgb(255 255 255 / .05));
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / .18);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .25),
+    inset 0 -1px 0 rgb(0 0 0 / .2),
+    0 8px 32px rgb(0 0 0 / .37);
 }
 .project-workspace {
   min-height:100dvh;
@@ -456,9 +533,13 @@ summary::-webkit-details-marker {
   color:var(--muted);
   text-align:center
 }
+/* Pinned to the footer with uniform padding (was flush right:0) and
+   vertically centered in the bar instead of sitting wherever flow left it. */
 .undo-circle {
   position:absolute;
-  right:0;
+  right:18px;
+  top:50%;
+  transform:translateY(-50%);
   width:78px;
   height:78px;
   border-radius:50%;
@@ -477,7 +558,11 @@ summary::-webkit-details-marker {
 .project-settings {
   margin:auto;
   color:#f5f7f7;
-  background-color:#191a20;
+  background:linear-gradient(135deg,rgb(30 32 40 / .82),rgb(16 17 23 / .88));
+  -webkit-backdrop-filter:blur(24px) saturate(150%);
+  backdrop-filter:blur(24px) saturate(150%);
+  border:1px solid rgb(255 255 255 / .14);
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / .2),0 16px 48px rgb(0 0 0 / .5);
   border-radius:24px;
   width:min(460px,calc(100% - 32px));
   padding:26px
@@ -629,6 +714,7 @@ summary::-webkit-details-marker {
     white-space:normal
   }
   .undo-circle {
+    top:auto;
     bottom:176px;
     z-index:6
   }
@@ -639,7 +725,442 @@ summary::-webkit-details-marker {
     margin-top:54px
   }
 }
-/* Keep the live canvas and voice dock visible on short laptop viewports. */
+/* ---- HiFi Editor/1 chrome (Figma 288:12094, Flow 2: Active editing) ----
+   Ground truth: 1280×832 frame, full-bleed blueprint grid is the project
+   viewport (localhost iframe fills it, transparent when empty). Every chrome
+   element is a detached glass island floating above it: Project title pill
+   270×52 top-left (back 52×52 + name 188×52, radius 20), Version History
+   Target circle ~86px top-right (25px history glyph), address HUD pill
+   centered, profile pill 86×37 bottom-left ("Anna K."), voice dock
+   bottom-center, and the All Voice Prompts pane as a floating island on the
+   right (slides in, never edge-attached) with Prompt containers (bg
+   #282D35, radius 6, p12, gap 8; summary Inter Medium 13, time Inter
+   Regular 10 muted #A5ADBA, body bg #131519 radius 6 p12, transcript Inter
+   Regular 13). Material is real glassmorphism — translucent fill +
+   blur/saturate + catch-light — so the live viewport reads through it. */
+.hifi-project {
+  --panel: #131519;
+  --card: #282d35;
+  --revert: #5d58e9;
+  --ink: #f5f7f7;
+  --muted: #a5adba;
+  position: relative;
+  display: block;
+  height: 100dvh;
+  overflow: hidden;
+  padding: 0;
+  color: var(--ink);
+  background-color: #0a0a0a;
+}
+/* The viewport IS the screen: the project's localhost fills it edge to
+   edge, transparent grid empty-state when nothing is connected. */
+.hifi-project .viewport {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.hifi-project .viewport iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background: white;
+}
+.hifi-project .preview-empty {
+  background: transparent;
+  min-height: 100%;
+  justify-content: center;
+}
+/* Text-bearing islands sit over arbitrary (often light) viewport content,
+   where translucent chrome washes to cream and white text dies (profile
+   menu, project pill, address HUD, history glyph all went invisible on
+   light sites). So every text- or glyph-bearing island uses the denser
+   glass — light foregrounds stay legible anywhere. */
+.hifi-project .voice-dock,
+.hifi-project .hifi-profile-pill,
+.hifi-project .hifi-project-pill,
+.hifi-project .hifi-address-hud,
+.hifi-project .hifi-history-target,
+.hifi-project .undo-circle,
+.hifi-project .hifi-menu {
+  background: linear-gradient(135deg, rgb(30 32 40 / .72), rgb(16 17 23 / .78));
+  border: 1px solid rgb(255 255 255 / .14);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .2),
+    inset 0 -1px 0 rgb(0 0 0 / .25),
+    0 16px 48px rgb(0 0 0 / .5);
+}
+/* Chrome floats above the viewport: pass clicks through everywhere except
+   the interactive elements themselves. */
+.hifi-project .hifi-header,
+.hifi-project .workspace-footer {
+  pointer-events: none;
+}
+.hifi-project .hifi-header :is(a, button, summary, input),
+.hifi-project .workspace-footer :is(a, button, summary, input) {
+  pointer-events: auto;
+}
+/* Header floats above the viewport. */
+.hifi-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 28px 0;
+}
+/* All floating chrome shares one glass material — pills, circle targets,
+   HUD, profile, menus. Radii and sizes differ per component; the material
+   never does. */
+.hifi-project-pill,
+.hifi-history-target,
+.hifi-address-hud,
+.hifi-profile-pill,
+.hifi-menu {
+  background: linear-gradient(135deg, rgb(255 255 255 / .14), rgb(255 255 255 / .05));
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / .18);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .25),
+    inset 0 -1px 0 rgb(0 0 0 / .2),
+    0 8px 32px rgb(0 0 0 / .37);
+}
+/* overflow must stay visible: the project-menu dropdown renders inside the
+   pill, and hidden clips it to 52px (menu items unreadable). */
+.hifi-project-pill {
+  display: flex;
+  align-items: stretch;
+  height: 52px;
+  min-width: 240px;
+  border-radius: 20px;
+  padding: 0;
+  overflow: visible;
+}
+.hifi-back {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  flex-shrink: 0;
+  color: var(--ink);
+  border-right: 1px solid var(--stroke);
+}
+.hifi-back:hover {
+  background-color: rgb(255 255 255 / .08);
+}
+.hifi-name-menu {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.hifi-name-menu summary {
+  padding: 0 16px 0 12px;
+}
+.hifi-project-pill .project-name {
+  font-size: 16px;
+}
+.hifi-menu {
+  overflow: hidden;
+}
+/* Address HUD: slim chrome pill centered in the header, on top of the
+   viewport — never a window inside it. */
+/* Optically centered: flex space-between parks the HUD off-center whenever
+   the side pills differ in width, so it anchors to the header midpoint. */
+.hifi-address-hud {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-radius: 20px;
+  font-family: var(--font-inter), sans-serif;
+  font-size: 11px;
+  color: var(--muted);
+}
+.hifi-address-text {
+  max-width: 280px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.hifi-hud-button {
+  width: 28px;
+  height: 28px;
+}
+/* Figma History Target ~86px circle (25px glyph). */
+.hifi-history-target {
+  display: grid;
+  place-items: center;
+  width: 86px;
+  height: 86px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--ink);
+  cursor: pointer;
+}
+.hifi-history-target:hover {
+  background-color: rgb(255 255 255 / .08);
+}
+.hifi-history-target.is-active {
+  color: #6fd6d1;
+  border-color: rgb(111 214 209 / .45);
+}
+/* Version-pane: a floating island on the right — detached on all four
+   sides, never an attached bar. Slides in from the right; off-canvas and
+   non-interactive when closed so viewport clicks pass through. Denser glass
+   than the small chrome so long lists stay readable. */
+.version-pane {
+  position: absolute;
+  top: 88px;
+  right: 24px;
+  bottom: 24px;
+  width: min(380px, calc(100vw - 48px));
+  z-index: 30;
+  overflow-y: auto;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgb(30 32 40 / .72), rgb(16 17 23 / .78));
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  border: 1px solid rgb(255 255 255 / .14);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .2),
+    inset 0 -1px 0 rgb(0 0 0 / .25),
+    0 16px 48px rgb(0 0 0 / .5);
+  padding: 20px 16px 24px;
+  transform: translateX(calc(100% + 32px));
+  visibility: hidden;
+  transition: transform .28s cubic-bezier(.22, 1, .36, 1), visibility 0s .28s;
+}
+.hifi-project.pane-open .version-pane {
+  transform: none;
+  visibility: visible;
+  transition: transform .28s cubic-bezier(.22, 1, .36, 1);
+}
+.hifi-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px;
+}
+.hifi-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-inter), "Jost", sans-serif;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.hifi-collapse {
+  width: 28px;
+  height: 28px;
+}
+.hifi-panel-sub {
+  font-family: "Jost", sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  padding: 0 6px;
+  margin: 8px 0 0;
+}
+.hifi-new-version {
+  border: 0;
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 6px;
+  margin: 16px 0 0;
+}
+.hifi-new-version:hover:not(:disabled) {
+  background: rgb(255 255 255 / .1);
+}
+.hifi-project .history-caption {
+  padding: 0 6px;
+}
+.hifi-prompt-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+/* Prompt container (Figma 288:12594): card bg #282D35 per Figma, radius 6,
+   p12, gap 8 — the dense glass lives one level up (the floating
+   version-pane), so long lists stay readable without re-styling the cards.
+   Click = check out; click the checked-out card again = revert here. */
+.prompt-card {
+  background: var(--card);
+  border: 1px solid var(--card);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.prompt-card:hover {
+  border-color: rgb(111 214 209 / .45);
+}
+.prompt-card.is-selected {
+  border-color: #6fd6d1;
+  box-shadow: 0 0 0 1px #6fd6d1;
+}
+.prompt-card:focus-visible {
+  outline: 2px solid #6fd6d1;
+  outline-offset: 2px;
+}
+.prompt-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+}
+.prompt-label {
+  font-family: var(--font-inter), sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.prompt-time {
+  flex-shrink: 0;
+  font-family: var(--font-inter), sans-serif;
+  font-size: 10px;
+  color: var(--muted);
+}
+.prompt-body {
+  margin-top: 8px;
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--panel);
+  font-size: 13px;
+  color: var(--ink);
+}
+.prompt-hint {
+  margin-top: 8px;
+  padding: 0 4px;
+  font-family: var(--font-inter), sans-serif;
+  font-size: 11px;
+  color: var(--muted);
+}
+.prompt-card.is-selected .prompt-hint {
+  color: #6fd6d1;
+}
+/* Profile pill bottom-left; expanded menu matches HiFi Profile menu. */
+.hifi-profile {
+  position: absolute;
+  bottom: 18px;
+  left: 28px;
+}
+.hifi-profile-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 37px;
+  min-width: 86px;
+  padding: 0 12px;
+  border-radius: 20px;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.hifi-profile-menu {
+  bottom: 48px;
+  left: 0;
+  top: auto;
+  width: 253px;
+}
+.hifi-profile-menu p {
+  border-top: 1px solid var(--stroke);
+  border-radius: 0 0 10px 10px;
+}
+/* Footer chrome floats above the viewport bottom; the dock stays centered. */
+.hifi-project .workspace-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  min-height: 0;
+  padding: 0 0 18px;
+  background: transparent;
+}
+.hifi-project .undo-circle {
+  z-index: 30;
+}
+@media (max-width: 760px) {
+  .version-pane {
+    top: 84px;
+    right: 12px;
+    bottom: 12px;
+    width: min(380px, calc(100vw - 24px));
+    padding-top: 16px;
+  }
+  .hifi-address-text {
+    max-width: 140px;
+  }
+  .hifi-profile {
+    left: 12px;
+  }
+  .hifi-history-target {
+    width: 48px;
+    height: 48px;
+  }
+}
+/* ---- Gaze blob (see components/blob.tsx + lib/blob-input.ts) ----
+   The OS cursor hides and one liquid-glass bubble marks the pointer on every
+   page. Frosted-glass tier (same material as .glass): identical in every
+   browser, no SVG-displacement GPU bill. Editable fields keep their native
+   cursor so caret/text selection stay visible. The bubble is
+   pointer-events:none (never blocks clicks or elementFromPoint) and fades in
+   on first pointer movement. */
+html.blob-on *:not(input):not(textarea):not(select):not([contenteditable]) {
+  cursor: none !important;
+}
+.blob {
+  position: fixed;
+  left: 0;
+  top: 0;
+  /* Topmost in-document layer: panes and menus paint below this, always. */
+  z-index: 2147483647;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 9999px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0.06));
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  /* Frosted fallback first (universal); true refraction lens second.
+     Browsers without backdrop-filter:url() drop the lens declaration and
+     keep the frost above — one rule order, no browser sniffing. */
+  backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: url(#blob-lens) blur(6px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / 0.35);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    inset 0 -1px 0 rgb(0 0 0 / 0.15),
+    0 8px 24px rgb(0 0 0 / 0.35);
+}
+.blob-show {
+  opacity: 1;
+}
 .project-workspace {
   height: 100dvh;
   grid-template-rows: 92px minmax(0, 1fr) auto;

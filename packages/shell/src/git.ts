@@ -1,12 +1,25 @@
 // Dev C: git service as a standalone Node module (no IPC here).
-// File-snapshot implementation that works against the template repo without
-// requiring a git binary: snapshots live under <root>/.mhacks-snapshots/<sha>.
-// Production wraps `git worktree add` behind the same interface; channels in
-// ipcRouter.ts expose createSnapshot/undo/confirm/history over IPC.
+// Real git behind the same interface the pipeline already speaks: one commit
+// per snapshot on a session branch rooted at the opened project, `git log`
+// as history, detached-HEAD checkout to view, `switch -C` to revert and drop
+// what's above. Channels in ipcRouter.ts expose
+// createSnapshot/undo/confirm/history/checkout/revertTo over IPC.
+//
+// Safety rules (this service runs against real user repos):
+// - The repo is rooted exactly at the project root. When the project is a
+//   subdir of another repo (e.g. the demo template), a nested repo is
+//   initialized there so gaze commits can never sweep or rewind outside
+//   files. Identity is repo-local (`gaze`), never global.
+// - Destructive worktree ops (checkout/revertTo/undo) stash uncommitted
+//   work first (`-u`, kept in the stash, never auto-popped) instead of
+//   destroying it.
+// - Viewing is non-destructive (detached HEAD, branch tip untouched).
+//   Committing always reattaches to the session branch first, so edits land
+//   on latest.
 
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import { randomBytes } from "node:crypto";
 
 export interface Snapshot {
   sha: string;
@@ -14,151 +27,271 @@ export interface Snapshot {
   at: number;
 }
 
-const STORE = ".mhacks-snapshots";
-const MANIFEST = "manifest.json";
+/** Identity + safety flags for every write command. Repo-local config is
+ *  also set on init; the flags cover pre-existing repos without identity. */
+const IDENTITY = [
+  "-c",
+  "user.name=gaze",
+  "-c",
+  "user.email=gaze@local",
+  "-c",
+  "commit.gpgsign=false",
+];
 
-function makeSha(): string {
-  return randomBytes(8).toString("hex");
+function runGit(root: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("git", ["-C", root, ...args], { timeout: 30000 }, (err, stdout, stderr) => {
+      if (err) {
+        const detail = String(stderr ?? "").trim() || err.message;
+        reject(new Error(`git ${args.filter((a) => !a.startsWith("-c") && a !== "gaze" && a !== "gaze@local" && a !== "false").join(" ")} failed: ${detail}`));
+      } else {
+        resolve(String(stdout ?? "").trim());
+      }
+    });
+  });
 }
 
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fs.stat(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function walkFiles(dir: string, out: string[], root: string): Promise<void> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  for (const e of entries) {
-    if (e.name === STORE || e.name === ".git" || e.name === "node_modules") continue;
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) {
-      await walkFiles(full, out, root);
-    } else if (e.isFile()) {
-      out.push(path.relative(root, full));
-    }
-  }
-}
-
-async function copyFile(root: string, dest: string, rel: string): Promise<void> {
-  const src = path.join(root, rel);
-  const dst = path.join(dest, rel);
-  await fs.mkdir(path.dirname(dst), { recursive: true });
-  await fs.copyFile(src, dst);
-}
-
-export class FileGitService {
+export class GitService {
   readonly root: string;
-  readonly storeDir: string;
+  private sessionBranch: string | null = null;
 
-  constructor(root: string, storeDir?: string) {
+  constructor(root: string) {
     this.root = root;
-    this.storeDir = storeDir ?? path.join(root, STORE);
   }
 
-  private manifestPath(): string {
-    return path.join(this.storeDir, MANIFEST);
+  private git(...args: string[]): Promise<string> {
+    return runGit(this.root, [...IDENTITY, ...args]);
   }
 
+  /** A repo rooted exactly here; nested-init when the project is a subdir
+   *  of another repo so all gaze history stays inside the project. */
+  private async ensureRepo(): Promise<void> {
+    let hasDotGit = false;
+    try {
+      await fs.stat(path.join(this.root, ".git"));
+      hasDotGit = true;
+    } catch {
+      hasDotGit = false;
+    }
+    if (!hasDotGit) {
+      try {
+        await this.git("init", "-q", "-b", "main");
+      } catch {
+        await this.git("init", "-q");
+      }
+    }
+    // Repo-local identity so commits never depend on (or touch) global config.
+    const name = await this.git("config", "user.name").catch(() => "");
+    if (!name) await this.git("config", "user.name", "gaze");
+    const email = await this.git("config", "user.email").catch(() => "");
+    if (!email) await this.git("config", "user.email", "gaze@local");
+    const attached = await this.currentBranch();
+    if (attached) this.sessionBranch = attached;
+  }
+
+  private async headSha(): Promise<string | null> {
+    try {
+      return await this.git("rev-parse", "HEAD");
+    } catch {
+      return null;
+    }
+  }
+
+  private async currentBranch(): Promise<string | null> {
+    try {
+      const b = await this.git("branch", "--show-current");
+      return b || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async localBranches(): Promise<string[]> {
+    try {
+      const out = await this.git("for-each-ref", "--format=%(refname:short)", "refs/heads/");
+      return out.split("\n").map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /** The branch edits land on and reverts reset: last attached branch seen,
+   *  else the single local branch, else an explicit error (never guess
+   *  across several branches while detached). */
+  private async sessionBranchName(): Promise<string> {
+    if (this.sessionBranch) return this.sessionBranch;
+    const attached = await this.currentBranch();
+    if (attached) {
+      this.sessionBranch = attached;
+      return attached;
+    }
+    const branches = await this.localBranches();
+    if (branches.length === 1 && branches[0]) {
+      this.sessionBranch = branches[0];
+      return branches[0];
+    }
+    throw new Error("detached HEAD with no single branch: switch to a branch first");
+  }
+
+  private async subjectOf(sha: string): Promise<string> {
+    return this.git("log", "-1", "--format=%s", sha);
+  }
+
+  private async resolveCommit(sha: string): Promise<string> {
+    try {
+      return await this.git("rev-parse", "--verify", `${sha}^{commit}`);
+    } catch {
+      throw new Error(`unknown sha ${sha}`);
+    }
+  }
+
+  /** Stash uncommitted work aside (kept in the stash, never auto-popped). */
+  private async stashAside(reason: string): Promise<void> {
+    const status = await this.git("status", "--porcelain");
+    if (status.length > 0) {
+      await this.git("stash", "push", "-u", "-m", `gaze: ${reason}`);
+    }
+  }
+
+  /** Ensure edits land on the session branch: if HEAD is detached (viewing
+   *  an older version), stash work aside, return to the branch, and restore
+   *  stashed work. No-op when already attached. Pop conflicts abort loudly
+   *  with the stash kept. */
+  async reattach(): Promise<{ switched: boolean }> {
+    if (!(await this.headSha())) return { switched: false }; // unborn: nothing to attach to
+    const branch = await this.sessionBranchName();
+    if ((await this.currentBranch()) === branch) return { switched: false };
+    const status = await this.git("status", "--porcelain");
+    const stashed = status.length > 0;
+    if (stashed) await this.git("stash", "push", "-u", "-m", "gaze: reattach");
+    try {
+      await this.git("switch", branch);
+    } catch {
+      await this.git("switch", "-c", branch);
+    }
+    if (stashed) {
+      try {
+        await this.git("stash", "pop");
+      } catch {
+        throw new Error(
+          "reattach conflict: your uncommitted changes are kept in the stash (see git stash list)",
+        );
+      }
+    }
+    return { switched: true };
+  }
+
+  /** Record the pristine tree as `gaze: initial` on first use, so Undo
+   *  always has somewhere to go — even for the very first edit. Idempotent:
+   *  no-op once any commit exists. The executor calls this pre-write (the
+   *  old pre-edit baseline), so the baseline predates the mutation. */
+  async ensureBaseline(): Promise<void> {
+    await this.ensureRepo();
+    if (await this.headSha()) return;
+    await this.git("add", "-A");
+    await this.git("commit", "--allow-empty", "-m", "gaze: initial");
+  }
+
+  /** Capture the tree as a commit. `files` scopes auto-commits (an edit
+   *  commits its own files); omitted stages everything (explicit versions). */
+  async createSnapshot(label: string, files?: string[]): Promise<Snapshot> {
+    await this.ensureRepo();
+    if (!(await this.headSha())) {
+      await this.git("add", "-A");
+      await this.git("commit", "--allow-empty", "-m", "gaze: initial");
+    }
+    await this.reattach();
+    if (files && files.length > 0) {
+      await this.git("add", "--", ...files);
+    } else {
+      await this.git("add", "-A");
+    }
+    await this.git("commit", "--allow-empty", "-m", label);
+    const sha = (await this.headSha()) as string;
+    if (!this.sessionBranch) this.sessionBranch = await this.currentBranch();
+    return { sha, label, at: Date.now() };
+  }
+
+  /** Session-branch log, stable across detached view: checking out an
+   *  older snapshot detaches HEAD, but the pane keeps listing newer
+   *  versions (the branch tip never moves on checkout). */
   async history(): Promise<Snapshot[]> {
-    if (!(await exists(this.manifestPath()))) return [];
-    const raw = await fs.readFile(this.manifestPath(), "utf8");
-    const list = JSON.parse(raw) as Snapshot[];
-    return [...list].sort((a, b) => a.at - b.at);
-  }
-
-  private async saveHistory(list: Snapshot[]): Promise<void> {
-    await fs.mkdir(this.storeDir, { recursive: true });
-    await fs.writeFile(this.manifestPath(), JSON.stringify(list, null, 2));
-  }
-
-  /** Capture current tree as a snapshot (auto-commit after each agent edit). */
-  async createSnapshot(label: string): Promise<Snapshot> {
-    const snap: Snapshot = { sha: makeSha(), label, at: Date.now() };
-    const dest = path.join(this.storeDir, snap.sha);
-    await fs.mkdir(dest, { recursive: true });
-    const files: string[] = [];
-    if (await exists(this.root)) await walkFiles(this.root, files, this.root);
-    for (const rel of files) {
-      if (rel.startsWith(STORE)) continue;
-      await copyFile(this.root, dest, rel);
+    let ref: string | null = null;
+    try {
+      ref = await this.sessionBranchName();
+    } catch {
+      ref = null;
     }
-    const list = await this.history();
-    list.push(snap);
-    await this.saveHistory(list);
-    return snap;
+    try {
+      const out = ref
+        ? await this.git("log", ref, "--format=%H%x1f%s%x1f%ct%x00")
+        : await this.git("log", "--format=%H%x1f%s%x1f%ct%x00");
+      // git appends a newline after each record's %x00; strip exactly it.
+      const list = out
+        .split("\0")
+        .map((rec) => rec.replace(/^\n/, ""))
+        .filter(Boolean)
+        .map((rec) => {
+          const [sha, label, ct] = rec.split("\x1f");
+          return { sha: sha ?? "", label: label ?? "", at: Number(ct) * 1000 };
+        });
+      return list.reverse();
+    } catch {
+      return [];
+    }
   }
 
-  /** Revert one applied edit. Undo markers stay in history for the timeline
-   *  but are skipped when finding the next target, so consecutive undos walk
-   *  back through real edits instead of oscillating (redoing) the last one.
-   *  History stays append-only; empty (or all-undone) history throws and the
-   *  router maps that to a not-ready envelope. */
+  /** Undo one commit: the branch tip steps back to its parent. Uncommitted
+   *  work is stashed aside first, never destroyed. */
   async undo(): Promise<{ snap: Snapshot; restored: boolean }> {
-    const list = await this.history();
-    const isMarker = (label: string): boolean => label.startsWith("undo ");
-    const undone = new Set<string>();
-    for (const s of list) {
-      const m = /^undo (\S+)/.exec(s.label);
-      if (m?.[1]) undone.add(m[1]);
+    await this.ensureRepo();
+    if (!(await this.headSha())) throw new Error("nothing to undo");
+    try {
+      await this.git("rev-parse", "HEAD~1");
+    } catch {
+      throw new Error("nothing to undo");
     }
-    // Last real edit that hasn't already been undone. Baselines (pre-edit)
-    // are never targets themselves — they are what we restore.
-    let idx = -1;
-    for (let i = list.length - 1; i >= 0; i--) {
-      const s = list[i];
-      if (!s) continue;
-      if (isMarker(s.label) || s.label.startsWith("pre-edit ") || undone.has(s.sha)) continue;
-      idx = i;
-      break;
-    }
-    if (idx < 0) throw new Error("nothing to undo");
-    const target = list[idx] as Snapshot;
-    // Baseline = nearest preceding entry with a snapshot dir (the paired
-    // pre-edit in executor flow; skips markers, which have no dir).
-    let base: Snapshot | null = null;
-    for (let i = idx - 1; i >= 0; i--) {
-      const cand = list[i];
-      if (!cand || isMarker(cand.label)) continue;
-      if (await exists(path.join(this.storeDir, cand.sha))) {
-        base = cand;
-        break;
+    await this.stashAside("undo");
+    await this.git("reset", "--hard", "HEAD~1");
+    const sha = (await this.headSha()) as string;
+    return { snap: { sha, label: await this.subjectOf(sha), at: Date.now() }, restored: true };
+  }
+
+  /** Checkout to view: detached HEAD at the commit, branch tip untouched.
+   *  Clicking the tip (re)attaches to the branch instead of detaching. */
+  async checkout(sha: string): Promise<Snapshot> {
+    await this.ensureRepo();
+    const full = await this.resolveCommit(sha);
+    await this.stashAside(`view ${full.slice(0, 8)}`);
+    try {
+      const branch = await this.sessionBranchName();
+      const tip = await this.git("rev-parse", "--verify", `refs/heads/${branch}`).catch(() => null);
+      if (full === tip) {
+        if ((await this.currentBranch()) !== branch) await this.git("switch", branch);
+        return { sha: full, label: await this.subjectOf(full), at: Date.now() };
       }
+    } catch {
+      // No usable branch (fresh repo, ambiguous detach): plain checkout below.
     }
-    if (!base) throw new Error("nothing to undo");
-    const srcDir = path.join(this.storeDir, base.sha);
-    // Clear tracked files (keep the store itself).
-    const files: string[] = [];
-    if (await exists(this.root)) await walkFiles(this.root, files, this.root);
-    for (const rel of files) {
-      await fs.rm(path.join(this.root, rel), { force: true });
-    }
-    if (srcDir && (await exists(srcDir))) {
-      const snapFiles: string[] = [];
-      await walkFiles(srcDir, snapFiles, srcDir);
-      for (const rel of snapFiles) {
-        if (rel === MANIFEST) continue;
-        const s = path.join(srcDir, rel);
-        const d = path.join(this.root, rel);
-        await fs.mkdir(path.dirname(d), { recursive: true });
-        await fs.copyFile(s, d);
-      }
-    }
-    const restored: Snapshot = { sha: makeSha(), label: `undo ${target.sha}`, at: Date.now() };
-    // Record the undo as a new history entry so timeline shows it.
-    const next = [...list, restored];
-    await this.saveHistory(next);
-    return { snap: restored, restored: true };
+    await this.git("checkout", full);
+    return { sha: full, label: await this.subjectOf(full), at: Date.now() };
+  }
+
+  /** Revert to a commit and drop everything above it: the session branch is
+   *  force-moved to the commit (old tip stays recoverable via reflog). */
+  async revertTo(sha: string): Promise<Snapshot> {
+    await this.ensureRepo();
+    const full = await this.resolveCommit(sha);
+    await this.stashAside(`revert to ${full.slice(0, 8)}`);
+    const branch = await this.sessionBranchName();
+    await this.git("switch", "-C", branch, full);
+    return { sha: full, label: await this.subjectOf(full), at: Date.now() };
   }
 
   /** Power-path commit marker on a pre-commit sha. Resolves the entry. */
   async confirm(sha: string): Promise<Snapshot> {
-    const list = await this.history();
-    const found = list.find((s) => s.sha === sha);
-    if (!found) throw new Error(`unknown sha ${sha}`);
-    return found;
+    await this.ensureRepo();
+    const full = await this.resolveCommit(sha);
+    return { sha: full, label: await this.subjectOf(full), at: Date.now() };
   }
 }

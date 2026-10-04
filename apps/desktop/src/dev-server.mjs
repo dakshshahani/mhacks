@@ -1,5 +1,5 @@
 // Browser-harness server (G2-G3).
-// REAL: HTTP, FileGitService, executor + Tier-1, PreviewHost, SpeechService,
+// REAL: HTTP, GitService, executor + Tier-1, PreviewHost, SpeechService,
 // Dev B pipeline (Jev or mockJev -> composeEditRequest -> agent:submitEdit),
 // Flash-Lite narrow diffs, template build gate, file-watch HMR truth.
 // STUBBED at the boundary (injectable, Dev A seam): the gaze probe (canned
@@ -16,7 +16,7 @@ import { execFile } from "node:child_process";
 import { join, extname, dirname, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { FileGitService } from "@mhacks/shell";
+import { GitService } from "@mhacks/shell";
 import { PreviewHost } from "@mhacks/shell";
 import { SpeechService } from "@mhacks/shell";
 import { IpcRouter } from "@mhacks/shell";
@@ -26,6 +26,7 @@ import {
   PipelineMachine,
   createJevLayer,
   generateNarrowDiff,
+  generateScaffold,
   verifyDecision,
   chooseFile,
 } from "@mhacks/orchestrator";
@@ -39,7 +40,7 @@ const port = Number(process.env.PORT ?? 5173);
 // distinctly: openProject shadows `port` with the project's picked port.
 const HARNESS_PORT = port;
 
-const git = new FileGitService(demoRoot);
+const git = new GitService(demoRoot);
 const preview = new PreviewHost();
 // Harness stub probe — Dev A seam: replace with the WebGazer queryElementAt
 // when it lands. Shape stays GazeFrame either way. Emulates a real prober:
@@ -189,6 +190,44 @@ const projectContext =
   "never inline styles or new CSS (the preview cannot render style objects). " +
   `Template files: ${demoFiles}. Work only within these files.`;
 
+// HMR truth, armed correctly: the file-watch can only observe a reload that
+// happens AFTER arming. Arming before the executor's write means our own
+// write resolves the wait (~120ms debounce) instead of a blind 2s timeout on
+// every edit. Drained once via didReload; manager identity is re-checked so
+// a mid-edit project switch fails honest-false instead of misattributing.
+function reloadArmer(getManager) {
+  let mgr = null;
+  let since = null;
+  return {
+    arm() {
+      mgr = getManager();
+      since = mgr ? mgr.lastReload : null;
+    },
+    wait(timeoutMs = 2000) {
+      const m = getManager();
+      const s = since;
+      since = null;
+      if (!m || m !== mgr || s === null) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        if (m.lastReload !== s) {
+          resolve(true);
+          return;
+        }
+        const off = m.onReload(() => {
+          clearTimeout(timer);
+          off();
+          resolve(true);
+        });
+        const timer = setTimeout(() => {
+          off();
+          resolve(m.lastReload !== s);
+        }, timeoutMs);
+      });
+    },
+  };
+}
+
+const demoReload = reloadArmer(() => devServer);
 const router = new IpcRouter({
   git,
   preview,
@@ -196,6 +235,7 @@ const router = new IpcRouter({
   executorDeps: {
     readFile: (p) => readFile(p, "utf8"),
     writeFile: async (p, t) => {
+      demoReload.arm();
       const { writeFile: wf } = await import("node:fs/promises");
       await wf(p, t, "utf8");
     },
@@ -219,7 +259,7 @@ const router = new IpcRouter({
         attempt: ctx.attempt,
       }),
     buildGate: buildGateFor(demoRoot, true),
-    didReload: () => devServer.waitForReload(2000),
+    didReload: () => demoReload.wait(),
   },
 });
 
@@ -466,11 +506,12 @@ async function handleDecideAndEdit(body, res) {
     case "applied": {
       const d = outcome.decision;
       console.log(
-        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)}`,
+        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)} stages=${JSON.stringify({ ...outcome.stages, total: Date.now() - t0 })}`,
       );
       sendJson(res, 200, {
         ok: true,
         decision: outcome.decision,
+        decisionMs: outcome.decisionMs,
         editRequest: outcome.editRequest,
         editResult: outcome.editResult,
         undoWindowMs: outcome.undoWindowMs,
@@ -504,7 +545,7 @@ let decideActive = 0;
 // ---------------------------------------------------------------------------
 // Project supervisor (gallery integration).
 // The demo pipeline above stays pointed at demoRoot always: the canned probe,
-// template build gate, executor resolveRoot and FileGitService are demo-only
+// template build gate, executor resolveRoot and GitService are demo-only
 // (gaze→edit on foreign repos is deferred — preview first). Foreign projects
 // get process supervision + preview URL only, via this separate manager.
 // Single-active: opening a project stops the previous one.
@@ -775,8 +816,93 @@ async function openProject(name) {
 // handles); only ONE dev server runs at a time (single-active).
 // ---------------------------------------------------------------------------
 
-const projectContexts = new Map();
+// ---------------------------------------------------------------------------
+// Generate-from-brief (voice-to-project): scaffold a zero-dep static site
+// from a spoken prompt via the scaffold model, then supervise it through the
+// same openProject path as gallery projects. Name rules mirror the
+// frontend's validProjectName so generated slugs route cleanly to /{project}.
+// ---------------------------------------------------------------------------
 
+const RESERVED_PROJECT_NAMES = new Set([
+  "projects",
+  "pricing",
+  "about",
+  "account",
+  "api",
+  "harness",
+  ".",
+  "..",
+]);
+const STOPWORDS = new Set(
+  "a,an,the,my,our,your,for,with,and,or,of,to,in,on,at,from,by,please,make,me,us,just,like,want,need,build,create,site,website,web,app,page".split(","),
+);
+
+/** Derive a routable slug from the brief (or explicit hint). Dedupes against
+ *  existing dirs with -2/-3 suffixes. Throws on unusable input. */
+async function allocateProjectSlug(prompt, nameHint) {
+  const source = typeof nameHint === "string" && nameHint.trim().length > 0 ? nameHint : prompt;
+  const words = source
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/[\s-]+/)
+    .filter((w) => w.length > 1 && !STOPWORDS.has(w))
+    .slice(0, 4);
+  let base = words.join("-").slice(0, 40).replace(/^-+|-+$/g, "");
+  if (!base) base = "idea";
+  if (RESERVED_PROJECT_NAMES.has(base)) base = `idea-${base}`;
+  let slug = base;
+  for (let n = 2; n < 100; n++) {
+    const taken = await stat(join(PROJECTS_ROOT, slug))
+      .then((st) => st.isDirectory())
+      .catch(() => false);
+    if (!taken) return slug;
+    slug = `${base}-${n}`.slice(0, 80);
+  }
+  throw new Error("could not allocate a project name — try a different idea");
+}
+
+let generatingSlug = null; // in-flight generate slug (transport-owned exclusion)
+
+/** Async job store: generations outlive the 30s Next rewrite proxy, so the
+ *  route returns a jobId immediately and the frontend polls status. */
+let generateSeq = 0;
+const generateJobs = new Map(); // jobId -> { state, name, value, message }
+
+/** Worker: scaffold + supervise an already-allocated slug. The route owns
+ *  validation, allocation, and the in-flight guard — this never re-checks. */
+async function runGeneration(slug, prompt) {
+  console.log(`[projects] generate "${slug}" from brief (${prompt.trim().length} chars)`);
+  // 300s stays under the frontend's 6min poll ceiling (180 × 2s).
+  const files = await generateScaffold(prompt, slug, {
+    logger: console,
+    timeoutMs: 300000,
+  });
+  if (!files) {
+    throw new Error(
+      "the generator came back empty — check GLM_API_KEY and try again",
+    );
+  }
+  const root = join(PROJECTS_ROOT, slug);
+  await mkdir(root, { recursive: true });
+  for (const f of files) {
+    const content = f.path === "package.json" ? scaffoldPackageJson(slug) : f.content;
+    await writeFile(join(root, f.path), content, "utf8");
+  }
+  return openProject(slug);
+}
+
+/** package.json is harness-shaped, not model-shaped: the dev script must boot
+ *  under `pnpm dev --port` supervision, so the name/dev fields are pinned
+ *  here instead of trusting model output. */
+function scaffoldPackageJson(slug) {
+  return JSON.stringify(
+    { name: slug, private: true, type: "module", scripts: { dev: "node server.mjs" } },
+    null,
+    2,
+  );
+}
+
+const projectContexts = new Map();
 async function projectContextFor(name) {
   let ctx = projectContexts.get(name);
   if (ctx) return ctx;
@@ -795,7 +921,7 @@ async function projectContextFor(name) {
     name,
     root,
     framework,
-    git: new FileGitService(root),
+    git: new GitService(root),
     projectContext:
       `${framework} project. Top-level: ${topLevel.slice(0, 1500)}. ` +
       "Work only within these files; reuse styling already present plus the " +
@@ -810,10 +936,14 @@ async function projectContextFor(name) {
 /** Executor deps bound to a project context (mirrors the demo router deps,
  *  but rooted at the project with its gate + model context). */
 function projectSubmitDeps(ctx) {
+  const reload = reloadArmer(() =>
+    activeProject && activeProject.name === ctx.name ? projectServer : null,
+  );
   return {
     git: ctx.git,
     readFile: (p) => readFile(p, "utf8"),
     writeFile: async (p, t) => {
+      reload.arm();
       const { writeFile: wf } = await import("node:fs/promises");
       await wf(p, t, "utf8");
     },
@@ -833,11 +963,9 @@ function projectSubmitDeps(ctx) {
       }),
     buildGate: ctx.buildGate,
     // HMR truth only when this project is the supervised one; otherwise
-    // honest false (the edit + gate + undo are still real).
-    didReload: () =>
-      activeProject && activeProject.name === ctx.name
-        ? projectServer.waitForReload(2000)
-        : Promise.resolve(false),
+    // honest false (the edit + gate + undo are still real). Armed pre-write
+    // so our own write resolves it instead of a blind 2s timeout per edit.
+    didReload: () => reload.wait(),
   };
 }
 
@@ -1141,6 +1269,8 @@ async function invokeForProject(project, channel, payload) {
     channel !== "git:undo" &&
     channel !== "git:confirm" &&
     channel !== "git:history" &&
+    channel !== "git:checkout" &&
+    channel !== "git:revertTo" &&
     channel !== "agent:submitEdit" &&
     channel !== "preview:queryElementAt"
   ) {
@@ -1172,6 +1302,14 @@ async function invokeForProject(project, channel, payload) {
       case "git:history": {
         const list = await ctx.git.history();
         return { ok: true, value: list.map((s) => ({ sha: s.sha, label: s.label, at: s.at })) };
+      }
+      case "git:checkout": {
+        const found = await ctx.git.checkout(payload?.sha);
+        return { ok: true, value: { sha: found.sha } };
+      }
+      case "git:revertTo": {
+        const found = await ctx.git.revertTo(payload?.sha);
+        return { ok: true, value: { sha: found.sha } };
       }
       case "agent:submitEdit":
         return await executorSubmitEdit(payload, projectSubmitDeps(ctx));
@@ -1253,6 +1391,65 @@ const server = createServer(async (req, res) => {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/projects/generate") {
+    try {
+      const body = await readJson(req);
+      const prompt = typeof body.prompt === "string" ? body.prompt : "";
+      if (prompt.trim().length < 3) {
+        throw new Error("describe your idea first — a few words is enough");
+      }
+      if (generatingSlug !== null) {
+        throw Object.assign(new Error(`already generating "${generatingSlug}"`), { status: 409 });
+      }
+      const nameHint = typeof body.name === "string" ? body.name : undefined;
+      const slug = await allocateProjectSlug(prompt, nameHint);
+      const jobId = `gen-${Date.now().toString(36)}-${(generateSeq += 1)}`;
+      generatingSlug = slug;
+      generateJobs.set(jobId, { state: "generating", name: slug, value: null, message: null });
+      console.log(`[projects] generate job ${jobId} for "${slug}"`);
+      void (async () => {
+        try {
+          const opened = await runGeneration(slug, prompt);
+          generateJobs.set(jobId, {
+            state: "ready",
+            name: opened.name,
+            value: opened,
+            message: null,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.log(`[projects] generate job ${jobId} failed: ${message}`);
+          generateJobs.set(jobId, { state: "failed", name: slug, value: null, message });
+        } finally {
+          if (generatingSlug === slug) generatingSlug = null;
+        }
+      })();
+      sendJson(res, 200, { ok: true, value: { jobId, name: slug } });
+    } catch (err) {
+      const status = err && typeof err.status === "number" ? err.status : 200;
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`[projects] generate failed: ${message}`);
+      sendJson(res, status, {
+        ok: false,
+        code: "unknown",
+        message,
+      });
+    }
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/projects/generate/status") {
+    const job = generateJobs.get(url.searchParams.get("jobId") ?? "");
+    if (!job) {
+      sendJson(res, 200, {
+        ok: false,
+        code: "unknown",
+        message: "unknown generation job — submit again",
+      });
+      return;
+    }
+    sendJson(res, 200, { ok: true, value: job });
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/events") {

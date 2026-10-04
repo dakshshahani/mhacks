@@ -3,6 +3,7 @@
 // header inlined in app/page.tsx — kept as a component so new routes share
 // it without duplicating markup again.
 import Link from "next/link";
+import { GLASS } from "./glass";
 
 const NAV = [
   { label: "Projects", href: "/gallery" },
@@ -10,19 +11,16 @@ const NAV = [
   { label: "About", href: "/about" },
 ];
 
-export function LogoMark() {
+export function LogoMark({ className = "h-[34px]" }: { className?: string }) {
   return (
-    <span
+    <img
+      src="/gaze-mark.svg"
+      alt=""
       aria-hidden
-      className="inline-block -mr-[0.12em] pr-[0.12em] text-[34px] italic leading-none text-transparent"
-      style={{
-        backgroundImage: "radial-gradient(circle at 50% 50%, #4a58bf, #4cbbc1)",
-        backgroundClip: "text",
-        WebkitBackgroundClip: "text",
-      }}
-    >
-      e
-    </span>
+      width={34}
+      height={37}
+      className={`inline-block w-auto ${className}`}
+    />
   );
 }
 
@@ -47,29 +45,29 @@ function UserIcon() {
 
 export default function SiteHeader() {
   return (
-    <header className="absolute left-[40px] top-[40px] flex h-16 w-[1200px] items-center justify-between">
+    <header className="absolute left-[40px] top-[40px] z-20 flex h-16 w-[1200px] items-center justify-between">
       <Link href="/" aria-label="gaze home" className="flex h-[60px] w-[60px] items-center justify-center">
         <LogoMark />
       </Link>
       <nav className="flex items-center gap-12" aria-label="Primary">
         <div className="flex items-center gap-5">
           {NAV.map((item) => (
-            <a
+            <Link
               key={item.label}
               href={item.href}
               className="flex h-[52px] w-[116px] items-center justify-center rounded-[12px] text-[20px] font-normal leading-7 text-[#f5f7f7] transition-opacity hover:opacity-75"
             >
               {item.label}
-            </a>
+            </Link>
           ))}
         </div>
-        <a
+        <Link
           href="/account"
           aria-label="Account"
-          className="flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px] transition-opacity hover:opacity-85"
+          className={`group flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 ${GLASS} transition-colors hover:bg-[#0b0b0b]/90 focus-visible:ring-2 focus-visible:ring-white/70`}
         >
           <UserIcon />
-        </a>
+        </Link>
       </nav>
     </header>
   );
