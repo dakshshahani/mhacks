@@ -78,7 +78,7 @@ export default function PricingPage() {
               drawn; content + glass carry the column structure. */}
           <div
             aria-hidden
-            className="pointer-events-none absolute left-[378px] top-0 h-[514px] w-[714px] bg-[#1d1d1d]/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_0_22px_rgba(255,255,255,0.08)] backdrop-blur-[40px]"
+            className="pointer-events-none absolute left-[378px] top-0 h-[514px] w-[714px] rounded-br-[32px] rounded-tr-[32px] bg-[#1d1d1d]/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_0_22px_rgba(255,255,255,0.08)] backdrop-blur-[40px]"
           />
 
           {/* table header: "Pricing" + sub at x117 y253 */}
