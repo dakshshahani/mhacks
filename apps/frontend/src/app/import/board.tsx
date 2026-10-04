@@ -98,7 +98,6 @@ export default function ImportBoard() {
         />
         <span className="mt-auto block pt-[16px] text-[16px] font-normal leading-6 text-[#c5cad3]">
           Connect repository <span aria-hidden>→</span>
-          <span className="block pt-[8px] text-[14px] leading-5">Not yet — local projects only for now.</span>
         </span>
       </CardShell>
     </div>
