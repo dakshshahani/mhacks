@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { COLUMNS, COLUMN_WIDTH } from "./columns";
 
 // TODO(billing): source from auth/entitlements when accounts exist.
 const CURRENT_PLAN = "Free" as const;
@@ -90,8 +91,8 @@ export default function PlanActions() {
 
   return (
     <>
-      <div className="absolute left-[495px] top-[698px] flex w-[661px]">
-        <div className="flex w-[191px] shrink-0 justify-center">
+      <div className="absolute top-[698px] flex w-[661px]" style={{ left: COLUMNS[0] }}>
+        <div className="flex shrink-0 justify-center" style={{ width: COLUMN_WIDTH }}>
           <button
             type="button"
             onClick={openWith("Enjoy building with Gaze for free.")}
@@ -103,7 +104,7 @@ export default function PlanActions() {
             Your current plan
           </button>
         </div>
-        <div className="flex w-[191px] shrink-0 justify-center" style={{ marginLeft: 44 }}>
+        <div className="flex shrink-0 justify-center" style={{ width: COLUMN_WIDTH, marginLeft: 44 }}>
           <button
             type="button"
             onClick={openWith("We'd like your money, but unfortunately, this is just a demo.")}
@@ -113,7 +114,7 @@ export default function PlanActions() {
             Upgrade now
           </button>
         </div>
-        <div className="flex w-[191px] shrink-0 justify-center" style={{ marginLeft: 44 }}>
+        <div className="flex shrink-0 justify-center" style={{ width: COLUMN_WIDTH, marginLeft: 44 }}>
           <button
             type="button"
             onClick={openWith("We'd like your money, but unfortunately, this is just a demo.")}

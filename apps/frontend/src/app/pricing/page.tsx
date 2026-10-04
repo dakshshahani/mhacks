@@ -10,7 +10,7 @@ import { Check, X } from "lucide-react";
 import ScaleStage from "../stage";
 import SiteHeader from "../components/site-header";
 import PlanActions from "./actions";
-import { COLUMNS, COLUMN_WIDTH, colLocal } from "./columns";
+import { COLUMNS, COLUMN_WIDTH } from "./columns";
 
 const TIERS = [
   { name: "Free", price: "$0/mo", tagline: "Try building by looking and talking." },
@@ -71,51 +71,54 @@ export default function PricingPage() {
         <section aria-label="Plans" className="absolute left-[84px] top-[237px] h-[514px] w-[1129px]">
           {/* solid base: labels→Pro, #131519 r32 */}
           <div aria-hidden className="absolute left-0 top-0 h-[514px] w-[881px] rounded-[32px] bg-[#131519]" />
-          {/* shared glass overlay across all three tier columns */}
+          {/* shared glass overlay across all three tier columns.
+              Sharp corners per Figma (no radius): its straight left edge is
+              the separator between the labels area and Free. No tier
+              containers — the Unions read as nothing discrete, so none are
+              drawn; content + glass carry the column structure. */}
           <div
             aria-hidden
-            className="pointer-events-none absolute left-[378px] top-0 h-[514px] w-[714px] rounded-[32px] bg-[#1d1d1d]/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_0_22px_rgba(255,255,255,0.08)] backdrop-blur-[40px]"
+            className="pointer-events-none absolute left-[378px] top-0 h-[514px] w-[714px] bg-[#1d1d1d]/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_0_22px_rgba(255,255,255,0.08)] backdrop-blur-[40px]"
           />
-          {/* tier overlays: elliptical caps (191×105), translucent, integrated */}
-          <div aria-hidden className="pointer-events-none absolute inset-0">
-            {COLUMNS.map((x) => (
-              <div
-                key={x}
-                className="absolute top-[-57px] h-[565px] bg-white/[0.03] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
-                style={{
-                  left: colLocal(x),
-                  width: COLUMN_WIDTH,
-                  borderRadius: "95px 95px 24px 24px / 105px 105px 24px 24px",
-                }}
-              />
-            ))}
+
+          {/* table header: "Pricing" + sub at x117 y253 */}
+          <div className="absolute left-[33px] top-[16px] w-[408px]">
+            <h2 className="text-[24px] font-normal leading-[35px] text-[#f5f7f7]">Pricing</h2>
+            <p className="mt-[6px] text-[14px] font-normal leading-5 text-[#c5cad3]">
+              Choose the plan that fits your workflow.
+            </p>
           </div>
 
           {/* tier headers: price / name / tagline, centered per column */}
           <div className="absolute left-[411px] top-[-38px] flex w-[661px]">
-            {TIERS.map((tier, i) => (
-              <div
-                key={tier.name}
-                className="flex w-[191px] shrink-0 flex-col items-center text-center"
-                style={{ marginLeft: i === 0 ? 0 : 44 }}
-              >
-                <p className="text-[20px] font-normal leading-[29px] text-[#f5f7f7]">{tier.price}</p>
-                <h2 className="mt-[20px] text-[24px] font-normal leading-[35px] text-[#f5f7f7]">{tier.name}</h2>
-                <p className="mt-[8px] max-w-[149px] text-[14px] font-normal leading-5 text-[#c5cad3]">
-                  {tier.tagline}
-                </p>
-              </div>
-            ))}
+            {COLUMNS.map((x, i) => {
+              const tier = TIERS[i];
+              if (!tier) return null;
+              return (
+                <div
+                  key={tier.name}
+                  className="flex shrink-0 flex-col items-center text-center"
+                  style={{ width: COLUMN_WIDTH, marginLeft: i === 0 ? 0 : 44 }}
+                >
+                  <p className="text-[20px] font-normal leading-[29px] text-[#f5f7f7]">{tier.price}</p>
+                  <h2 className="mt-[20px] text-[24px] font-normal leading-[35px] text-[#f5f7f7]">{tier.name}</h2>
+                  <p className="mt-[8px] max-w-[149px] text-[14px] font-normal leading-5 text-[#c5cad3]">
+                    {tier.tagline}
+                  </p>
+                </div>
+              );
+            })}
           </div>
 
-          {/* feature rows: labels col + value cells at the shared columns */}
+          {/* feature rows: dividers run labels-only in Figma (x117 w325),
+              so the border lives on the label cell, not the row */}
           <div className="absolute left-[33px] top-[95px] w-[1039px]">
             {ROWS.map((row) => (
               <div
                 key={row.label}
-                className="flex h-[53px] items-center border-b border-white/10"
+                className="flex h-[53px] items-center"
               >
-                <p className="w-[325px] shrink-0 text-[14px] font-normal leading-5 text-[#f5f7f7]">
+                <p className="w-[325px] shrink-0 border-b border-white/10 pb-[8px] text-[14px] font-normal leading-5 text-[#f5f7f7]">
                   {row.label}
                 </p>
                 {row.values.map((cell, i) => (
