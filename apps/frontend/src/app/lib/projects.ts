@@ -38,6 +38,12 @@ function harnessError(action: string, body: unknown): Error {
   return new Error(`${action} failed: ${message}`);
 }
 
+/** Shared envelope unwrap for the harness IpcResult-shaped routes. */
+function unwrap<T>(action: string, res: Response, body: { ok: boolean; value?: T } & { message?: string }): T {
+  if (!res.ok || !body.ok || body.value === undefined) throw harnessError(action, body);
+  return body.value;
+}
+
 export function relativeEdited(mtimeMs: number): string {
   if (!mtimeMs) return "unknown";
   const mins = Math.max(0, Math.round((Date.now() - mtimeMs) / 60000));
@@ -63,6 +69,58 @@ export async function fetchProjects(): Promise<Project[]> {
     framework: e.framework,
     lastEdited: relativeEdited(e.mtimeMs),
   }));
+}
+
+/** Generate = scaffold a starter site from a spoken brief, then supervise it
+ *  like any gallery project. Generations outlive the 30s Next rewrite proxy,
+ *  so this starts a job and polls status every 2s until ready/failed.
+ *  Resolves with the preview URL to route to. Throws with the harness
+ *  message for the UI to show. */
+export interface GenerationJob {
+  jobId: string;
+  name: string;
+}
+
+export interface GenerationStatus {
+  state: "generating" | "ready" | "failed";
+  name: string;
+  value: ActiveProject | null;
+  message: string | null;
+}
+
+export async function startGeneration(prompt: string): Promise<GenerationJob> {
+  const res = await fetch("/api/projects/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  const body = (await res.json()) as { ok: boolean; value?: GenerationJob } & { message?: string };
+  return unwrap("generate", res, body);
+}
+
+export async function generationStatus(jobId: string): Promise<GenerationStatus> {
+  const res = await fetch(`/api/projects/generate/status?jobId=${encodeURIComponent(jobId)}`, {
+    cache: "no-store",
+  });
+  const body = (await res.json()) as { ok: boolean; value?: GenerationStatus } & { message?: string };
+  return unwrap("generate status", res, body);
+}
+
+/** Poll ceiling: 6min at 2s cadence — past that the job is presumed stalled
+ *  and the UI must surface retry instead of spinning forever. */
+const MAX_POLLS = 180;
+
+export async function generateProject(prompt: string): Promise<ActiveProject> {
+  const { jobId } = await startGeneration(prompt);
+  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const status = await generationStatus(jobId);
+    if (status.state === "ready" && status.value) return status.value;
+    if (status.state === "failed") {
+      throw new Error(status.message || "Generation failed.");
+    }
+  }
+  throw new Error("Generation timed out — retry to try again.");
 }
 
 /** Open = single-active supervisor spawns `pnpm dev` and waits for ready.
