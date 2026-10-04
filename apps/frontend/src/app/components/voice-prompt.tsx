@@ -127,12 +127,15 @@ export default function VoicePrompt() {
     return clearSilenceTimer;
   }, [transcript, clearSilenceTimer, submit]);
 
-  // Voice lifecycle. Chrome ends recognition on long pauses — restart while
-  // still listening with nothing to submit yet. All state writes here happen
-  // in async recognizer callbacks, never synchronously in the effect body.
-  // The recognizer is (re)created here on mount AND on demand from clicks:
-  // a click that finds no live recognizer builds one, so clicking the pill
-  // always visibly starts voice (or drops to the typed pill on failure).
+  // Voice lifecycle. The recognizer is created on mount but only STARTED on
+  // user intent (pill click, gaze dwell, retry): autostarting on page load
+  // races permission prompts and turns quiet-room no-speech errors into an
+  // instant failure screen. Chrome ends recognition on long pauses — restart
+  // while still listening with nothing to submit yet. All state writes here
+  // happen in async recognizer callbacks, never synchronously in the effect
+  // body. The recognizer is (re)created here on mount AND on demand from
+  // clicks: a click that finds no live recognizer builds one, so clicking
+  // the pill always visibly starts voice (or drops to the typed pill).
   const attachRecognition = useCallback(
     (rec: Recognition) => {
       rec.continuous = true;
@@ -150,9 +153,18 @@ export default function VoicePrompt() {
           setDenied(true);
           return;
         }
+        // Quiet room — not a failure. The recognizer keeps listening and the
+        // 4.5s silence gate submits whatever was said (if anything).
+        if (event.error === "no-speech" || event.error === "aborted") return;
         if (phase.current !== "listening") return;
         setPhase("error");
-        setFailure("The microphone cut out — retry to keep speaking, or type instead.");
+        if (event.error === "audio-capture") {
+          setFailure("No microphone found — check it's connected and not held by another app, or type instead.");
+        } else if (event.error === "network") {
+          setFailure("Speech service unreachable — check your connection, or type instead.");
+        } else {
+          setFailure("The microphone cut out — retry to keep speaking, or type instead.");
+        }
       };
       rec.onend = () => {
         if (phase.current === "listening" && textRef.current.trim().length === 0) {
@@ -185,11 +197,9 @@ export default function VoicePrompt() {
     if (!asrAvailable) return;
     const rec = ensureRecognition();
     if (!rec) return;
-    try {
-      rec.start();
-    } catch {
-      // Blocked until a user gesture: the pill overlay below starts it.
-    }
+    // No autostart: the mic starts on pill click, gaze dwell, or retry.
+    // (Autostarting on load races permission prompts and turns quiet-room
+    // no-speech errors into an instant failure screen.)
     return () => {
       recognition.current = null;
       try {
@@ -237,6 +247,14 @@ export default function VoicePrompt() {
     setTranscript(text);
     void submit(text);
   }, [draft, submit]);
+
+  /** Error escape hatch: keep the spoken words as editable draft. */
+  const typeInstead = useCallback(() => {
+    setDraft(textRef.current.trim());
+    setPhase("listening");
+    setFailure("");
+    setForceTyped(true);
+  }, [setPhase]);
 
   // `transcript` state mirrors textRef on every update, so render reads state
   // only (refs stay in callbacks/effects). During generating/error the last
@@ -352,6 +370,14 @@ export default function VoicePrompt() {
                 className="underline underline-offset-2 transition-opacity hover:opacity-75"
               >
                 Retry
+              </button>{" "}
+              or{" "}
+              <button
+                type="button"
+                onClick={typeInstead}
+                className="underline underline-offset-2 transition-opacity hover:opacity-75"
+              >
+                type instead
               </button>
             </p>
           )}
