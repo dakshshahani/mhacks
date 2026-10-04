@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { IdeaPrompt, PILL_OUTER_CLASS, PILL_TAB_CLASS, promptStateFor } from "./idea-prompt";
+import LookToSpeak from "./look-to-speak";
 import { generateProject } from "../lib/projects";
 import { projectHref } from "../project-url";
 
@@ -75,6 +76,8 @@ export default function VoicePrompt() {
   const phase = useRef<Status>("listening");
   const textRef = useRef("");
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pillRef = useRef<HTMLButtonElement | null>(null);
+  const [dwellFill, setDwellFill] = useState(0);
   const useTypedFallback = forceTyped || !asrAvailable || denied;
 
   /** Single phase transition (ref + state stay together). */
@@ -127,45 +130,61 @@ export default function VoicePrompt() {
   // Voice lifecycle. Chrome ends recognition on long pauses — restart while
   // still listening with nothing to submit yet. All state writes here happen
   // in async recognizer callbacks, never synchronously in the effect body.
+  // The recognizer is (re)created here on mount AND on demand from clicks:
+  // a click that finds no live recognizer builds one, so clicking the pill
+  // always visibly starts voice (or drops to the typed pill on failure).
+  const attachRecognition = useCallback(
+    (rec: Recognition) => {
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+      rec.onresult = (event) => {
+        if (phase.current !== "listening") return;
+        let combined = "";
+        for (const result of event.results) combined += result[0]?.transcript ?? "";
+        textRef.current = combined;
+        setTranscript(combined);
+      };
+      rec.onerror = (event) => {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setDenied(true);
+          return;
+        }
+        if (phase.current !== "listening") return;
+        setPhase("error");
+        setFailure("The microphone cut out — retry to keep speaking, or type instead.");
+      };
+      rec.onend = () => {
+        if (phase.current === "listening" && textRef.current.trim().length === 0) {
+          try {
+            rec.start();
+          } catch {
+            // Already running or blocked — the error handler covers it.
+          }
+        }
+      };
+      recognition.current = rec;
+    },
+    [setPhase],
+  );
+
+  const ensureRecognition = useCallback((): Recognition | null => {
+    if (recognition.current) return recognition.current;
+    const Ctor = recognitionCtor();
+    if (!Ctor) return null;
+    try {
+      const rec = new Ctor();
+      attachRecognition(rec);
+      return rec;
+    } catch {
+      return null;
+    }
+  }, [attachRecognition]);
+
   useEffect(() => {
     if (!asrAvailable) return;
-    const Ctor = recognitionCtor();
-    if (!Ctor) return;
-    let rec: Recognition | null = null;
-    try {
-      rec = new Ctor();
-    } catch {
-      return;
-    }
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-    rec.onresult = (event) => {
-      if (phase.current !== "listening") return;
-      let combined = "";
-      for (const result of event.results) combined += result[0]?.transcript ?? "";
-      textRef.current = combined;
-      setTranscript(combined);
-    };
-    rec.onerror = (event) => {
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        setDenied(true);
-        return;
-      }
-      if (phase.current !== "listening") return;
-      setPhase("error");
-      setFailure("The microphone cut out — retry to keep speaking, or type instead.");
-    };
-    rec.onend = () => {
-      if (phase.current === "listening" && textRef.current.trim().length === 0) {
-        try {
-          rec?.start();
-        } catch {
-          // Already running or blocked — the error handler covers it.
-        }
-      }
-    };
-    recognition.current = rec;
+    const rec = ensureRecognition();
+    if (!rec) return;
     try {
       rec.start();
     } catch {
@@ -174,16 +193,22 @@ export default function VoicePrompt() {
     return () => {
       recognition.current = null;
       try {
-        rec?.stop();
+        rec.stop();
       } catch {
         // Already stopped.
       }
     };
-  }, [asrAvailable, setPhase]);
+  }, [asrAvailable, ensureRecognition]);
 
   const startListening = useCallback(() => {
-    const rec = recognition.current;
-    if (!rec) return;
+    const rec = ensureRecognition();
+    if (!rec) {
+      // No speech API after all — show the typed pill instead of silence.
+      setForceTyped(true);
+      return;
+    }
+    setForceTyped(false);
+    setDenied(false);
     setPhase("listening");
     setFailure("");
     try {
@@ -191,7 +216,7 @@ export default function VoicePrompt() {
     } catch {
       // Already running — interim results will flow.
     }
-  }, [setPhase]);
+  }, [ensureRecognition, setPhase]);
 
   const retry = useCallback(() => {
     if (textRef.current.trim().length >= 3) {
@@ -246,12 +271,22 @@ export default function VoicePrompt() {
         <>
           <IdeaPrompt state={state} transcript={displayTranscript} />
           {!useTypedFallback && state === "default" && status === "listening" && (
-            <button
-              type="button"
-              onClick={startListening}
-              aria-label="Start speaking your idea"
-              className="absolute left-[490px] top-[729px] h-[65px] w-[300px] cursor-pointer rounded-[32px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
-            />
+            <>
+              <button
+                ref={pillRef}
+                type="button"
+                onClick={startListening}
+                aria-label="Look here and speak, or click to start speaking"
+                title="Look here and speak — or click to start"
+                className="absolute left-[490px] top-[729px] h-[65px] w-[300px] cursor-pointer rounded-[32px] transition-[background-color] focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+                style={
+                  dwellFill > 0
+                    ? { backgroundColor: `rgba(111, 214, 209, ${0.14 * dwellFill})` }
+                    : undefined
+                }
+              />
+              <LookToSpeak targetRef={pillRef} onDwell={startListening} onProgress={setDwellFill} />
+            </>
           )}
         </>
       )}
@@ -260,7 +295,22 @@ export default function VoicePrompt() {
       {state === "default" && status === "listening" && (
         <div className="absolute left-[490px] top-[800px] w-[300px] text-center">
           {useTypedFallback ? (
-            asrAvailable && !denied ? (
+            !asrAvailable ? (
+              <p className="text-[12px] font-normal leading-4 text-[#c5cad3]/50">
+                Mic unavailable in this browser
+              </p>
+            ) : denied ? (
+              <p className="text-[12px] font-normal leading-4 text-[#c5cad3]/70">
+                Mic blocked — allow it in the address bar, then{" "}
+                <button
+                  type="button"
+                  onClick={startListening}
+                  className="underline underline-offset-2 transition-opacity hover:opacity-75"
+                >
+                  try again
+                </button>
+              </p>
+            ) : (
               <button
                 type="button"
                 onClick={() => {
@@ -271,10 +321,6 @@ export default function VoicePrompt() {
               >
                 Use mic instead
               </button>
-            ) : (
-              <p className="text-[12px] font-normal leading-4 text-[#c5cad3]/50">
-                Mic unavailable in this browser
-              </p>
             )
           ) : (
             <button
