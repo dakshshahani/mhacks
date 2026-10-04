@@ -64,7 +64,7 @@ export default function SiteHeader() {
         <Link
           href="/account"
           aria-label="Account"
-          className={`flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 ${GLASS} transition-opacity hover:opacity-85`}
+          className={`group flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 ${GLASS} transition-colors hover:bg-[#0b0b0b]/90 focus-visible:ring-2 focus-visible:ring-white/70`}
         >
           <UserIcon />
         </Link>
