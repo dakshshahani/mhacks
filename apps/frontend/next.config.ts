@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
     return [
       { source: "/harness/:path*", destination: `${harness}/:path*` },
       { source: "/api/invoke", destination: `${harness}/api/invoke` },
+      { source: "/api/transcribe", destination: `${harness}/api/transcribe` },
+      { source: "/api/projects", destination: `${harness}/api/projects` },
+      { source: "/api/projects/:path*", destination: `${harness}/api/projects/:path*` },
       { source: "/api/events", destination: `${harness}/api/events` },
       { source: "/api/transcript", destination: `${harness}/api/transcript` },
       { source: "/api/decide-and-edit", destination: `${harness}/api/decide-and-edit` },

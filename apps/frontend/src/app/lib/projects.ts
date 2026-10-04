@@ -1,35 +1,91 @@
-// Project gallery data (frontend-only phase).
-// MOCK seam: static stand-ins for React projects on the user's laptop until
-// folder access lands. Selection + user-added entries persist in localStorage;
-// no file reads, no server calls. Names 1–15 mirror the Figma frame.
+// Project gallery data — live from the harness supervisor.
+// GET /api/projects scans ~/Documents/Projects (runnable dirs only:
+// package.json + non-empty dev script). Selection persists in localStorage;
+// the list itself is never cached across loads — every gallery visit
+// re-scans, so newly added folders just appear.
 
 export interface Project {
   id: string;
   name: string;
-  /** Laptop path as displayed in the tile (mock until directory access). */
+  /** Absolute laptop path of the project root. */
   path: string;
-  framework: "React";
-  /** Display string ("2h ago"); real mtimes arrive with folder access. */
+  framework: string;
+  /** Display string ("2h ago"); derived from the root mtime. */
   lastEdited: string;
 }
 
-export const MOCK_PROJECTS: Project[] = [
-  { id: "portfolio", name: "Portfolio", path: "~/code/portfolio", framework: "React", lastEdited: "2h ago" },
-  { id: "studio-website", name: "Studio website", path: "~/code/studio-website", framework: "React", lastEdited: "5h ago" },
-  { id: "travel-journal", name: "Travel journal", path: "~/code/travel-journal", framework: "React", lastEdited: "Yesterday" },
-  { id: "habit-tracker", name: "Habit tracker", path: "~/code/habit-tracker", framework: "React", lastEdited: "Yesterday" },
-  { id: "recipe-collection", name: "Recipe collection", path: "~/code/recipe-collection", framework: "React", lastEdited: "2d ago" },
-  { id: "online-store", name: "Online store", path: "~/code/online-store", framework: "React", lastEdited: "3d ago" },
-  { id: "design-system", name: "Design system", path: "~/code/design-system", framework: "React", lastEdited: "4d ago" },
-  { id: "reading-list", name: "Reading list", path: "~/code/reading-list", framework: "React", lastEdited: "5d ago" },
-  { id: "team-dashboard", name: "Team dashboard", path: "~/code/team-dashboard", framework: "React", lastEdited: "Sep 28" },
-  { id: "photography", name: "Photography", path: "~/code/photography", framework: "React", lastEdited: "Sep 26" },
-  { id: "personal-blog", name: "Personal blog", path: "~/code/personal-blog", framework: "React", lastEdited: "Sep 24" },
-  { id: "event-page", name: "Event page", path: "~/code/event-page", framework: "React", lastEdited: "Sep 21" },
-  { id: "product-launch", name: "Product launch", path: "~/code/product-launch", framework: "React", lastEdited: "Sep 18" },
-  { id: "music-library", name: "Music library", path: "~/code/music-library", framework: "React", lastEdited: "Sep 15" },
-  { id: "weekend-project", name: "Weekend project", path: "~/code/weekend-project", framework: "React", lastEdited: "Sep 12" },
-];
+export interface ActiveProject {
+  name: string;
+  root: string;
+  previewUrl: string;
+  port: number;
+  startedAt: number;
+  running: boolean;
+}
+
+interface ScanEntry {
+  name: string;
+  path: string;
+  framework: string;
+  mtimeMs: number;
+}
+
+function harnessError(action: string, body: unknown): Error {
+  const message =
+    typeof body === "object" && body !== null && "message" in body && typeof body.message === "string"
+      ? body.message
+      : "unknown error";
+  return new Error(`${action} failed: ${message}`);
+}
+
+export function relativeEdited(mtimeMs: number): string {
+  if (!mtimeMs) return "unknown";
+  const mins = Math.max(0, Math.round((Date.now() - mtimeMs) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(mtimeMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Live scan — throws on transport error or {ok:false} envelope. */
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await fetch("/api/projects", { cache: "no-store" });
+  if (!res.ok) throw new Error(`scan failed: harness returned ${res.status}`);
+  const body = (await res.json()) as { ok: boolean; value?: ScanEntry[] } & { message?: string };
+  if (!body.ok || !Array.isArray(body.value)) throw harnessError("scan", body);
+  return body.value.map((e) => ({
+    id: e.name,
+    name: e.name,
+    path: e.path,
+    framework: e.framework,
+    lastEdited: relativeEdited(e.mtimeMs),
+  }));
+}
+
+/** Open = single-active supervisor spawns `pnpm dev` and waits for ready.
+ *  Resolves with the preview URL to iframe. Throws with the harness message
+ *  (no dev script, install failure, port/spawn failure) for the UI to show. */
+export async function openProject(name: string): Promise<ActiveProject> {
+  const res = await fetch("/api/projects/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const body = (await res.json()) as { ok: boolean; value?: ActiveProject } & { message?: string };
+  if (!res.ok || !body.ok || !body.value) throw harnessError(`open "${name}"`, body);
+  return body.value;
+}
+
+export async function fetchActiveProject(): Promise<ActiveProject | null> {
+  const res = await fetch("/api/projects/active", { cache: "no-store" });
+  if (!res.ok) return null;
+  const body = (await res.json()) as { ok: boolean; value?: ActiveProject | null };
+  if (!body.ok) return null;
+  return body.value ?? null;
+}
 
 const SELECTED_KEY = "gaze:currentProject";
 const CUSTOM_KEY = "gaze:customProjects";
@@ -49,27 +105,7 @@ export function saveSelectedId(id: string): void {
   notifyGallery();
 }
 
-/** User-added entries from /import (name-only until folder access lands). */
-export function loadCustomProjects(): Project[] {
-  if (!canStore()) return [];
-  try {
-    const raw = window.localStorage.getItem(CUSTOM_KEY);
-    if (!raw) return [];
-    const list = JSON.parse(raw) as Partial<Project>[];
-    return list
-      .filter((p) => typeof p.name === "string" && p.name.length > 0)
-      .map((p, i) => ({
-        id: typeof p.id === "string" ? p.id : `custom-${i}`,
-        name: p.name as string,
-        path: typeof p.path === "string" ? p.path : "~",
-        framework: "React" as const,
-        lastEdited: typeof p.lastEdited === "string" ? p.lastEdited : "just now",
-      }));
-  } catch {
-    return [];
-  }
-}
-
+/** Kept for /import (name-only entries until folder access lands there too). */
 export function saveCustomProject(p: { name: string; path: string }): Project {
   const entry: Project = {
     id: `custom-${Date.now().toString(36)}`,
@@ -79,30 +115,29 @@ export function saveCustomProject(p: { name: string; path: string }): Project {
     lastEdited: "just now",
   };
   if (canStore()) {
-    window.localStorage.setItem(CUSTOM_KEY, JSON.stringify([...loadCustomProjects(), entry]));
+    try {
+      const raw = window.localStorage.getItem(CUSTOM_KEY);
+      const list = raw ? (JSON.parse(raw) as unknown[]) : [];
+      window.localStorage.setItem(CUSTOM_KEY, JSON.stringify([...list, entry]));
+    } catch {
+      // Storage full/blocked — entry still returned for immediate use.
+    }
     notifyGallery();
   }
   return entry;
 }
 
-/* Reactive snapshots for useSyncExternalStore: SSR-safe (server snapshots
-   are the static defaults, so first paint always matches), client takes
-   over from localStorage after hydration. Same-tab writes dispatch a
-   window event because "storage" only fires cross-tab. */
+/* Selection-only reactive snapshots for useSyncExternalStore: SSR-safe
+   (server snapshot is null, first paint matches), client takes over from
+   localStorage after hydration. Same-tab writes dispatch a window event
+   because "storage" only fires cross-tab. The project LIST is fetched with
+   useEffect in the board — never part of these snapshots. */
 
 type GalleryListener = () => void;
 
-// Cached project snapshot: useSyncExternalStore requires referential
-// stability (a fresh array per call = infinite loop). Invalidated on every
-// notification before listeners re-read.
-let cachedProjects: Project[] | null = null;
-
 export function subscribeGallery(listener: GalleryListener): () => void {
   if (typeof window === "undefined") return () => {};
-  const wrapped = () => {
-    cachedProjects = null;
-    listener();
-  };
+  const wrapped = () => listener();
   window.addEventListener("gaze:gallery", wrapped);
   window.addEventListener("storage", wrapped);
   return () => {
@@ -122,13 +157,4 @@ export function getSelectionSnapshot(): string | null {
 
 export function getSelectionServerSnapshot(): string | null {
   return null;
-}
-
-export function getProjectsSnapshot(): Project[] {
-  if (!cachedProjects) cachedProjects = [...loadCustomProjects(), ...MOCK_PROJECTS];
-  return cachedProjects;
-}
-
-export function getProjectsServerSnapshot(): Project[] {
-  return MOCK_PROJECTS;
 }

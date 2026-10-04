@@ -24,13 +24,36 @@ export default function Workspace({ name, preview, demo, initialError }: { name:
     return () => controller.abort();
   }, [demo, retry]);
 
+  // Foreign projects: editing enables only on a supervised match — the
+  // harness actively runs THIS project and the iframe shows its proxy URL.
+  // A stale/bookmarked ?preview= (dead port, unsupervised server) stays
+  // preview-only instead of failing edits confusingly.
+  useEffect(() => {
+    if (demo) return;
+    const controller = new AbortController();
+    const norm = (u: string) => u.replace(/\/+$/, '');
+    fetch('/api/projects/active', { signal: controller.signal })
+      .then(async (res) => {
+        const body = await res.json();
+        const v = body.value;
+        if (body.ok && v && v.name === name && norm(v.previewUrl) === norm(preview)) {
+          setConnected(true);
+          setConnectionError('');
+        } else {
+          setConnected(false);
+        }
+      })
+      .catch(() => { if (!controller.signal.aborted) setConnectionError('Start the desktop harness on port 5173, then reconnect.'); });
+    return () => controller.abort();
+  }, [demo, name, preview, retry]);
+
   return (
     <main className={`project-workspace bg-blueprint-grid ${historyOpen ? 'with-history' : ''}`}>
       <header className="workspace-header" data-gaze-overlay>
         <div className="workspace-project workspace-glass">
-          <a href="/projects" className="icon-button" aria-label="Back to projects"><ChevronLeft size={18} /></a>
+          <a href="/gallery" className="icon-button" aria-label="Back to projects"><ChevronLeft size={18} /></a>
           <span className="project-divider" />
-          <details className="project-menu"><summary><span className="project-name">{name}</span><ChevronDown size={14} /></summary><div className="workspace-menu workspace-glass"><a href="/projects"><FolderOpen size={16} /> View projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Project settings</button></div></details>
+          <details className="project-menu"><summary><span className="project-name">{name}</span><ChevronDown size={14} /></summary><div className="workspace-menu workspace-glass"><a href="/gallery"><FolderOpen size={16} /> View projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Project settings</button></div></details>
         </div>
         <div className="workspace-view-label"><span className="status-dot" />{demo ? 'Live playground' : 'Local preview'}</div>
         <button className={`icon-button workspace-glass history-toggle ${historyOpen ? 'is-active' : ''}`} aria-label="Version history" aria-expanded={historyOpen} aria-controls="version-history" onClick={() => setHistoryOpen(!historyOpen)}><History size={20} /></button>
@@ -38,7 +61,7 @@ export default function Workspace({ name, preview, demo, initialError }: { name:
 
       <section className="preview-area" aria-label="Project preview">
         <div className="preview-address"><span className="status-dot" /><span>{demo ? 'localhost:5173 / demo' : preview || 'No preview connected'}</span><div><button className="icon-button" aria-label="Reload preview" disabled={!preview} onClick={() => { if (frame.current) frame.current.src = preview; }}><RotateCcw size={14} /></button>{preview && <a href={preview} target="_blank" rel="noreferrer" className="icon-button" aria-label="Open preview in a new tab"><ExternalLink size={14} /></a>}</div></div>
-        {preview && (!demo || connected) ? <iframe ref={frame} id="preview" title={`${name} live preview`} src={preview} /> : <div className="preview-empty"><span className="empty-orbit"><span className="workspace-brand">e</span></span><h1>{demo ? 'Your playground is almost ready.' : 'A space for your next idea.'}</h1><p>{initialError || connectionError || (demo ? 'Connecting to the live preview…' : 'Connect your localhost dev server to see your project here.')}</p>{connectionError ? <button className="workspace-primary" onClick={() => setRetry(retry + 1)}>Reconnect</button> : !demo && <button className="workspace-primary" onClick={() => settings.current?.showModal()}>Connect preview</button>}</div>}
+        {preview && connected ? <iframe ref={frame} id="preview" title={`${name} live preview`} src={preview} /> : <div className="preview-empty"><span className="empty-orbit"><span className="workspace-brand">e</span></span><h1>{demo ? 'Your playground is almost ready.' : 'A space for your next idea.'}</h1><p>{initialError || connectionError || (demo ? 'Connecting to the live preview…' : preview ? 'This preview is not supervised — open the project from the gallery to start its server and enable editing.' : 'Connect your localhost dev server to see your project here.')}</p>{connectionError ? <button className="workspace-primary" onClick={() => setRetry(retry + 1)}>Reconnect</button> : !demo && preview && !connected ? <a className="workspace-primary" href="/gallery">Open gallery</a> : !demo && !preview && <button className="workspace-primary" onClick={() => settings.current?.showModal()}>Connect preview</button>}</div>}
       </section>
 
       <aside id="version-history" className="history-panel workspace-glass" hidden={!historyOpen} data-gaze-overlay>
@@ -49,14 +72,14 @@ export default function Workspace({ name, preview, demo, initialError }: { name:
       </aside>
 
       <footer className="workspace-footer" data-gaze-overlay>
-        <details className="account-menu"><summary className="icon-button workspace-glass" aria-label="Account menu"><UserRound size={20} /></summary><div className="workspace-menu workspace-glass"><p>gaze workspace</p><a href="/projects"><FolderOpen size={16} /> View projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Settings</button></div></details>
+        <details className="account-menu"><summary className="icon-button workspace-glass" aria-label="Account menu"><UserRound size={20} /></summary><div className="workspace-menu workspace-glass"><p>gaze workspace</p><a href="/gallery"><FolderOpen size={16} /> View projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Settings</button></div></details>
         <div className="voice-dock workspace-glass">
-          <div className="voice-status"><span className="voice-wave" aria-hidden><i /><i /><i /><i /><i /></span><span id="status" role="status">{demo ? 'Click an element, then describe your change.' : 'Preview mode · source editing is not connected'}</span></div>
-          <div id="point" className="point-status">{demo ? 'Click the preview to select a target' : 'Your dev server stays in control'}</div>
+          <div className="voice-status"><span className="voice-wave" aria-hidden><i /><i /><i /><i /><i /></span><span id="status" role="status">{demo || connected ? 'Click an element, then describe your change.' : 'Preview mode · open from the gallery to edit'}</span></div>
+          <div id="point" className="point-status">{demo || connected ? 'Click the preview to select a target' : 'Your dev server stays in control'}</div>
           <div id="fail" role="alert" className="workspace-error" style={{ display: 'none' }} />
           {connected && connectionError && <p role="alert" className="workspace-error">{connectionError}</p>}
-          <div className="voice-input"><label className="sr-only" htmlFor="transcript">Describe your change</label><input id="transcript" placeholder={demo ? 'Tell gaze what to change…' : 'Connect source editing to make changes'} disabled={!connected} /><button id="mic-toggle" className="icon-button mic-button" disabled={!connected} aria-label="Toggle microphone"><Mic size={18} /></button><button id="send" className="send-button" disabled={!connected} aria-label="Apply change"><ArrowUp size={18} /></button></div>
-          <span id="mic" className="mic-status">{demo ? 'Mic off · browser speech' : 'Preview only'}</span>
+          <div className="voice-input"><label className="sr-only" htmlFor="transcript">Describe your change</label><input id="transcript" placeholder={demo || connected ? 'Tell gaze what to change…' : 'Open from the gallery to enable editing'} disabled={!connected} /><button id="mic-toggle" className="icon-button mic-button" disabled={!connected} aria-label="Toggle microphone"><Mic size={18} /></button><button id="send" className="send-button" disabled={!connected} aria-label="Apply change"><ArrowUp size={18} /></button></div>
+          <span id="mic" className="mic-status">{demo || connected ? 'Mic off · browser speech' : 'Preview only'}</span>
         </div>
         <button id="undo" className="undo-circle workspace-glass" style={{ display: 'none' }} aria-label="Undo last edit"><RotateCcw size={20} /> Undo</button>
       </footer>

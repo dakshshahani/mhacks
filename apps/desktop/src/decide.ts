@@ -19,6 +19,7 @@ import {
   type EditResult,
   type ElementCandidate,
   type GazeFrame,
+  type Intent,
   type IpcResult,
   type ParentAddress,
 } from "@mhacks/contracts";
@@ -137,6 +138,16 @@ export interface DecideServices {
   };
   /** Dev C preview probe (envelope already unwrapped by the caller). */
   queryFrame: (x: number, y: number) => Promise<GazeFrame>;
+  /** Foreign-project file mapping (hybrid finder, harness-side). Absent for
+   *  demo, where the probe stamps filePath directly. Runs on the DECIDED
+   *  target with its intent (content intents anchor on quoted text, others on
+   *  the component definition). Must return a project-root-relative path or
+   *  null (fail card, never a guessed file). */
+  resolveFile?: (
+    target: ElementCandidate,
+    transcript: string,
+    intent: Intent,
+  ) => Promise<string | null>;
 }
 
 export type DecideOutcome =
@@ -224,6 +235,27 @@ export async function decideAndEdit(
     pipeline.reset();
     speech.resetToIdle();
     return { kind: "dropped", decision };
+  }
+
+  // Foreign-project mapping, on the DECIDED target (Jev may pick a different
+  // candidate than lock-on guessed) with its intent, BEFORE compose — so the
+  // request carries a server-resolved file. Unresolvable = fail card.
+  let decidedTarget = frame.candidates.find((c) => c.id === decision.target) ?? null;
+  if (!decidedTarget) {
+    pipeline.fail("target left the frame before the edit composed");
+    speech.resetToIdle();
+    return { kind: "error", message: "target left the frame; nothing applied" };
+  }
+  if (!decidedTarget.filePath && services.resolveFile) {
+    const resolved = await services.resolveFile(decidedTarget, text, decision.intent);
+    if (!resolved) {
+      pipeline.fail(`couldn't map ${decidedTarget.componentName ?? "element"} to a source file`);
+      speech.resetToIdle();
+      return { kind: "error", message: "couldn't map the clicked element to a source file; try another element" };
+    }
+    decidedTarget = { ...decidedTarget, filePath: resolved };
+    const idx = frame.candidates.findIndex((c) => c.id === decidedTarget?.id);
+    if (idx >= 0) frame.candidates[idx] = decidedTarget;
   }
 
   const composed = composeEditRequest({ transcript: text, decision, frame });
