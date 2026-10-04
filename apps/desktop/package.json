@@ -3,10 +3,15 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "main": "dist-electron/main.mjs",
   "scripts": {
     "check": "tsc --noEmit",
     "test": "node --test src/gaze/*.test.js",
-    "dev": "node --experimental-strip-types --env-file=../../.env --import ../../packages/shell/dev-register.mjs --import ../../packages/orchestrator/dev-register.mjs ./src/dev-server.mjs"
+    "dev": "node --experimental-strip-types --env-file=../../.env --import ../../packages/shell/dev-register.mjs --import ../../packages/orchestrator/dev-register.mjs ./src/dev-server.mjs",
+    "build:main": "node ./scripts/build-main.mjs",
+    "dev:electron": "node ./scripts/run-electron.mjs",
+    "pack:dir": "node ./scripts/build-main.mjs && pnpm --filter @mhacks/frontend build && node ./scripts/stage-frontend.mjs && electron-builder --mac --dir",
+    "dist:mac": "node ./scripts/build-main.mjs && pnpm --filter @mhacks/frontend build && node ./scripts/stage-frontend.mjs && electron-builder --mac"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
@@ -16,6 +21,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.0"
   }
 }

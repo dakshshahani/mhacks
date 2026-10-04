@@ -289,11 +289,7 @@ export function createGazeController({
     });
   }
 
-  function handleProbeMessage(event) {
-    const message = event.data;
-    if (!message || message.type !== "preview-gaze-frame") return;
-    const iframe = getPreview();
-    if (!iframe || event.source !== iframe.contentWindow) return;
+  function receiveReply(message) {
     requestInFlight = false;
     acceptFrame(message.frame, { x: message.x, y: message.y }, latestCursor?.point ?? null);
     if (queuedRequest) {
@@ -304,6 +300,23 @@ export function createGazeController({
       requestInFlight = true;
       inFlightAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     }
+  }
+
+  function handleProbeMessage(event) {
+    const message = event.data;
+    if (!message || message.type !== "preview-gaze-frame") return;
+    const iframe = getPreview();
+    if (!iframe || event.source !== iframe.contentWindow) return;
+    receiveReply(message);
+  }
+
+  /** Electron shell path: the preview webview's guest bridge delivers query
+   *  replies via sendToHost (no forgeable MessageEvent source exists there),
+   *  already scoped to our own webview by the renderer's ipc-message wiring.
+   *  Same pump state machine as the iframe path. */
+  function acceptProbeReply(message) {
+    if (!message || !message.frame) return;
+    receiveReply(message);
   }
 
   function processFrame() {
@@ -362,13 +375,34 @@ export function createGazeController({
     mounted = true;
     window.addEventListener("message", handleProbeMessage);
     window.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("visibilitychange", handleVisibility);
     bindPreview(getPreview());
     onStatus("starting head tracking…");
-    tracker = startHeadTracking((pose) => {
-      latestPose = pose;
-      if (pose) onStatus("head tracking active · press R to recenter");
+    tracker = startHeadTracking(
+      (pose) => {
+        latestPose = pose;
+        if (pose) onStatus("head tracking active · press R to recenter");
+      },
+      {
+        onError: (message) => {
+          // Fatal tracker fault (stall watchdog / repeated detect failures):
+          // teardown already ran inside, camera released. Surface the
+          // specific cause — the previous "starting…" forever told nothing.
+          onStatus(`head tracking stopped: ${message}`);
+        },
+      },
+    );
+    tracker.ready.catch((error) => {
+      // Setup-phase failure (no camera API, denied prompt, stalled stream):
+      // fail() already tore down, but stop() again is idempotent-safe.
+      // Releases the camera so the light goes off instead of lingering.
+      try {
+        tracker?.stop();
+      } catch {
+        // Teardown must never break status reporting.
+      }
+      onStatus(`camera unavailable: ${error?.message ?? "permission denied"}`);
     });
-    tracker.ready.catch((error) => onStatus(`camera unavailable: ${error?.message ?? "permission denied"}`));
     animationFrame = window.requestAnimationFrame(processFrame);
   }
 
@@ -404,6 +438,14 @@ export function createGazeController({
     acceptFrame(frame, previewPoint, hostPoint);
   }
 
+  function handleVisibility() {
+    // rAF (the detection pump) doesn't fire while hidden — say so instead
+    // of freezing on stale geometry; it resumes on its own when visible.
+    if (typeof document === "undefined" || !mounted) return;
+    if (document.hidden) onStatus("tracking paused — tab hidden");
+    else if (latestPose) onStatus("head tracking active · press R to recenter");
+  }
+
   function handleKeyDown(event) {
     if (event.key.toLowerCase() === "r") {
       recenter();
@@ -425,6 +467,11 @@ export function createGazeController({
     if (animationFrame) window.cancelAnimationFrame(animationFrame);
     window.removeEventListener("message", handleProbeMessage);
     window.removeEventListener("keydown", handleKeyDown);
+    try {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    } catch {
+      // Already detached.
+    }
     if (boundIframe) boundIframe.removeEventListener("load", onPreviewLoad);
     if (boundDoc) boundDoc.removeEventListener("scroll", onPreviewScroll, true);
     boundIframe = null;
@@ -434,5 +481,5 @@ export function createGazeController({
     overlay.remove();
   }
 
-  return { start, stop, setSpeechState, recenter, acceptExternalFrame };
+  return { start, stop, setSpeechState, recenter, acceptExternalFrame, acceptProbeReply };
 }

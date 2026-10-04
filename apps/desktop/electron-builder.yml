@@ -1,0 +1,63 @@
+# electron-builder config (full app: window + supervised harness + frontend).
+# Main + harness backend are esbuild bundles (Node refuses type-stripping
+# for TS physically under node_modules/): dist-electron inlines all main +
+# workspace TS. Renderer, gaze, probe and guest files are plain JS.
+# asar is OFF on purpose: the packaged app forks plain-node children
+# (harness bundle, Next standalone) and plain node cannot read asar
+# archives — every runtime file must be a real file on disk.
+# extraResources (outside any archive): demo template seed → userData on
+# first run (E10-A), guest bridge files, Next standalone server.
+appId: ai.mhacks.desktop
+productName: gaze
+directories:
+  output: release
+  buildResources: build
+files:
+  - package.json
+  - index.html
+  - dist-electron/**/*
+  - src/renderer.js
+  - src/transport.js
+  - src/preview-embed.js
+  - src/probe.js
+  - src/gaze/**/*
+  - "!src/**/*.test.js"
+  - node_modules/@mediapipe/tasks-vision/vision_bundle.mjs
+  - node_modules/@mediapipe/tasks-vision/wasm/**/*
+extraResources:
+  # Pristine template only: .git internals break codesign (ENOENT on
+  # objects), and .mhacks-snapshots is test history that must not seed
+  # user installs.
+  - from: demo
+    to: demo
+    filter:
+      - "**/*"
+      - "!**/.git/**"
+      - "!**/.mhacks-snapshots/**"
+  - from: src/guest/preview-preload.js
+    to: guest/preview-preload.js
+  - from: src/probe.js
+    to: guest/probe.js
+  # Next standalone server (staged inside the project dir by
+  # scripts/stage-frontend.mjs — extraResources cannot reliably reach
+  # outside the project root).
+  - from: staged-frontend
+    to: frontend
+asar: false
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSCameraUsageDescription: mhacks tracks your gaze to find the element you're looking at.
+    NSMicrophoneUsageDescription: mhacks listens for your edit commands when you press the mic.
+# Notarization needs APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+# in the environment (CI or ~/.zshrc) — never committed. Unsigned `pack:dir`
+# builds skip this automatically.

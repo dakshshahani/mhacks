@@ -3,15 +3,26 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Shell + harness share this page (file:// and http://localhost). No
+       inline scripts exist; styles are inline by design (style-src allows).
+       connect-src covers the head-tracking model CDN; script-src carries
+       wasm-unsafe-eval for the MediaPipe wasm bundle (no unsafe-eval, no
+       inline script). The Scribe key lives main-side and never crosses. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://storage.googleapis.com; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; font-src 'self' data:" />
   <title>mhacks desktop harness</title>
   <style>
     body { margin: 0; background: #0b0e14; color: #e6e9f0; font-family: system-ui, sans-serif; }
     #bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
+    /* Frameless Electron shell (main hides the title bar; preload sets
+       data-electron-shell): the bar doubles as the drag region with room
+       for the floating traffic lights; inputs + buttons stay clickable. */
+    html[data-electron-shell] #bar { -webkit-app-region: drag; padding-left: 80px; }
+    html[data-electron-shell] #bar button, html[data-electron-shell] #bar input { -webkit-app-region: no-drag; }
     #mic { border: 1px solid #333; border-radius: 999px; padding: 4px 10px; }
     #mic-toggle { cursor: pointer; border-radius: 999px; padding: 4px 12px; }
     #mic-toggle[aria-pressed="true"] { border-color: #f87171; }
     #transcript { flex: 1; min-width: 200px; background: #141a26; color: #e6e9f0; border: 1px solid #333; border-radius: 6px; padding: 4px 8px; }
-    #preview { width: 100%; height: calc(100vh - 190px); border: 0; background: white; }
+    #preview, #preview-webview { width: 100%; height: calc(100vh - 190px); border: 0; background: white; }
     #undo { position: fixed; right: 24px; bottom: 24px; width: 72px; height: 72px;
       border-radius: 50%; border: 2px solid #7dd3fc; display: none;
       align-items: center; justify-content: center; background: rgba(125,211,252,.12); cursor: pointer; }
@@ -34,8 +45,18 @@
   </div>
   <div id="fail" data-testid="fail-card" role="alert"></div>
   <ol id="history" data-testid="version-history"></ol>
-  <!-- Browser harness preview (G1-G2). Electron <webview> replaces this later. -->
-  <iframe id="preview" title="preview" src="/demo/preview.html"></iframe>
+  <!-- Browser harness preview (G1-G2). In the Electron shell the webview
+       below replaces the iframe; the harness (plain Chrome) keeps the iframe.
+       Neither embed has a markup src (a file:// shell would fail the absolute
+       path noisily before JS runs): the harness sets the iframe src at
+       runtime, the shell is main-driven (data: URL via the preview:reload
+       handshake). The webview preload path is injected by dev-server.mjs from
+       ELECTRON_GUEST_PRELOAD in the harness; the shell sets it at runtime
+       from shell:guestPreload. -->
+  <iframe id="preview" title="preview"></iframe>
+  <webview id="preview-webview" title="preview"
+    preload="<!--ELECTRON-GUEST-PRELOAD-->" partition="persist:preview"
+    style="display: none;"></webview>
   <!-- Undo circle: risk-widened window from the server, click reverts (PM renders). -->
   <div id="undo" data-testid="undo-circle">undo</div>
   <script type="module" src="./src/renderer.js"></script>

@@ -34,7 +34,11 @@ import { decideAndEdit, extractTextSpans } from "./decide.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..");
-const demoRoot = join(appRoot, "demo");
+// Packaged full-app: main seeds a writable demo copy in userData and points
+// the supervised harness at it (the app dir may be read-only; snapshots must
+// be writable). Dev default: the repo template. dist-electron/harness.mjs
+// (esbuild bundle) sits one level below the package root, same as src/.
+const demoRoot = process.env.DEMO_ROOT ?? join(appRoot, "demo");
 const port = Number(process.env.PORT ?? 5173);
 // Harness origin (the proxy lives here, not on project ports). Named
 // distinctly: openProject shadows `port` with the project's picked port.
@@ -452,6 +456,24 @@ async function handleDecideAndEdit(body, res) {
     let services;
     if (project === "demo") {
       const liveFrame = sanitizeFrame(body.frame, { allowSource: true });
+      // Foreign frame on the demo pipeline (custom ?preview= address, or a
+      // project name that didn't survive transport): zero allowlisted
+      // filePaths means the hybrid finder never ran, and the executor would
+      // fail opaquely on "no filePath". Fail fast naming the actual cause.
+      if (
+        liveFrame &&
+        liveFrame.candidates.length > 0 &&
+        !liveFrame.candidates.some((c) => typeof c.filePath === "string" && c.filePath.length > 0)
+      ) {
+        console.log(`[pipeline] demo pipeline got a foreign frame (${liveFrame.candidates.length} candidates, none mapped) — route it via the gallery project instead`);
+        sendJson(res, 422, {
+          ok: false,
+          code: "unknown",
+          message:
+            "this looks like a project page, not the demo — open the project from the gallery so its files can be mapped, then edit there",
+        });
+        return;
+      }
       services = {
         decide: jevLayer,
         submitEdit: (req) => router.invoke("agent:submitEdit", req),
@@ -1578,7 +1600,18 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    const data = await readFile(join(appRoot, path));
+    let data = await readFile(join(appRoot, path));
+    if (path === "/index.html") {
+      // Electron host seam: the preview <webview>'s guest preload must be an
+      // absolute file:// URL the embedder page can't know. Injected from the
+      // environment (run-electron.mjs sets it); empty in the harness, where
+      // <webview> is an inert unknown element and the iframe path is used.
+      data = Buffer.from(
+        data
+          .toString("utf8")
+          .replace("<!--ELECTRON-GUEST-PRELOAD-->", process.env.ELECTRON_GUEST_PRELOAD ?? ""),
+      );
+    }
     res.writeHead(200, {
       "Content-Type": MIME[extname(path)] ?? "application/octet-stream",
       "Cache-Control": "no-store",

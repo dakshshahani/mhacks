@@ -3,6 +3,7 @@ import { Inter, Jost } from "next/font/google";
 import Blob from "./components/blob";
 import GazeProvider from "./components/gaze-provider";
 import "./globals.css";
+import ElectronShell from "./electron-shell";
 
 export const metadata: Metadata = {
   title: "gaze — Point with your eyes, direct with your voice",
@@ -33,6 +34,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <Blob />
         {/* Head-tracking sensor: publishes window.__gazePoint; silent without camera. */}
         <GazeProvider />
+        {/* Electron frameless-shell marker (post-hydration; see electron-shell.tsx). */}
+        <ElectronShell />
       </body>
     </html>
   );
