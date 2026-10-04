@@ -1,9 +1,13 @@
-/* Ground truth: Figma "Landing/1" (1280×832), pulled via REST API.
-   Frame bg #0A0A0A · ink #F5F7F7 · muted #C5CAD3 · wordmark Jost Italic 72 ·
-   tagline Jost Italic 25px ls -1.25 · nav Jost 20px · panel Inter 16px.
-   All geometry absolutely positioned in frame coordinates; ScaleStage
-   width-fits the 1280×832 frame so proportions hold at any viewport. */
-import { Mic } from "lucide-react";
+/* Ground truth: Figma "Flow 1: New state landing" (1280×832), pulled via REST.
+   Landing/1 default (14:1316): frame bg #0A0A0A · ink #F5F7F7 · muted #C5CAD3 ·
+   wordmark Jost Italic 72 · tagline Jost Italic 25px ls -1.25 · nav Jost 20px.
+   Orbit ring 411px at x434 y373; orb 315px centered (639.5, 578.5); ring mark
+   is the dark-glass Profile Target w/ gradient "e" at 3 o'clock (x802 y539).
+   Textbox set 288:9158: default pill 300×65 p12 r32 at x490 y729 reading
+   "Look here. Start speaking"; speaking panel 600×197 p15 r32 at x340 y600
+   (atOrUnderSix: transcript from start · overSix: tail pinned w/ "…").
+   Tab inner: white 31% screen, r20, Jost 16/24. All geometry absolutely
+   positioned in frame coordinates; ScaleStage width-fits the frame. */
 import Link from "next/link";
 import ScaleStage from "./stage";
 
@@ -42,20 +46,13 @@ function UserIcon() {
   );
 }
 
-function MicIcon() {
+/** Ring mark — Figma Profile Target on the orbit (86×88 dark glass + gradient
+ *  "e"). Sits at 3 o'clock on the ring; positioned by the caller. */
+function OrbitMark() {
   return (
-    <>
-      <svg aria-hidden width="0" height="0" className="absolute">
-        <defs>
-          <linearGradient id="micGrad" x1="0" y1="0" x2="24" y2="24">
-            <stop offset="0" stopColor="#7b61ff" />
-            <stop offset="0.55" stopColor="#4a58bf" />
-            <stop offset="1" stopColor="#4cbbc1" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <Mic size={26} strokeWidth={2} color="url(#micGrad)" aria-hidden />
-    </>
+    <div className="flex h-[88px] w-[86px] items-center justify-center rounded-full bg-[#1d1d1d]/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px]">
+      <LogoMark />
+    </div>
   );
 }
 
@@ -121,6 +118,47 @@ const NAV = [
   { label: "About", href: "/about" },
 ];
 
+export type PromptState = "default" | "atOrUnderSix" | "overSix";
+
+/** Figma Textbox set 288:9158. Display-only; Task 2 drives `state` from live
+ *  speech (silence → submit). Empty panel copy is the Idea prompt component:
+ *  "Start talking: describe your idea and we'll build the first version." */
+export function IdeaPrompt({
+  state = "default",
+  transcript = "",
+}: {
+  state?: PromptState;
+  transcript?: string;
+}) {
+  if (state === "default") {
+    return (
+      <section aria-label="Voice prompt" className="absolute left-[490px] top-[729px] h-[65px] w-[300px]">
+        <div className="h-full w-full rounded-[32px] bg-gradient-to-b from-[#666666]/40 via-[#1d1d1d]/90 to-[#1d1d1d] p-3 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px]">
+          <div className="flex h-[41px] items-center justify-center rounded-[20px] bg-white/[0.31] px-[35px] mix-blend-screen backdrop-blur-[40px]">
+            <p className="text-center text-[16px] font-normal leading-6 text-[#f5f7f7]">
+              Look here. Start speaking
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+  const text =
+    transcript ||
+    "Start talking: describe your idea and we'll build the first version.";
+  return (
+    <section aria-label="Voice prompt" aria-live="polite" className="absolute left-[340px] top-[600px] h-[197px] w-[600px]">
+      <div className="h-full w-full rounded-[32px] bg-gradient-to-b from-[#666666]/40 via-[#1d1d1d]/90 to-[#1d1d1d] p-[15px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px]">
+        <div className="h-[168px] overflow-hidden rounded-[20px] bg-white/[0.31] px-[35px] py-[15px] mix-blend-screen backdrop-blur-[40px]">
+          <p className="text-[16px] font-normal leading-6 text-[#f5f7f7]">
+            {state === "overSix" && transcript ? `…${text}` : text}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
   return (
     <main className="min-h-dvh bg-[#0a0a0a] text-white">
@@ -150,18 +188,19 @@ export default function Home() {
                 </a>
               ))}
             </div>
-            <a
+            <Link
               href="/account"
               aria-label="Account"
               className="flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px] transition-opacity hover:opacity-85"
             >
               <UserIcon />
-            </a>
+            </Link>
           </nav>
         </header>
 
-        {/* wordmark: centered x640, top 221 */}
-        <div className="absolute left-1/2 top-[221px] -translate-x-1/2">
+        {/* wordmark: full-logo vectors x566 y198, 148×56; 72px em box
+            carries ~17px top bearing, so top-181 lands glyphs on 198 */}
+        <div className="absolute left-1/2 top-[181px] -translate-x-1/2">
           <div className="relative">
             <div aria-hidden className="absolute left-1/2 top-1/2 h-[99px] w-[251px] -translate-x-1/2 -translate-y-1/2 bg-[#f2f2fa]/50 blur-[100px]" />
             <h1 className="relative text-[72px] font-light italic leading-none tracking-[-0.02em]">
@@ -180,45 +219,31 @@ export default function Home() {
           </div>
         </div>
 
-        {/* tagline: x405 y335, 470×36 */}
-        <p className="absolute left-[405px] top-[335px] h-9 w-[470px] text-center text-[25px] italic leading-9 text-[#c5cad3] [letter-spacing:-1.25px]">
+        {/* tagline: x405 y294, 470×36 · orbit clears it by 43px (y373) */}
+        <p className="absolute left-[405px] top-[294px] h-9 w-[470px] text-center text-[25px] italic leading-9 text-[#c5cad3] [letter-spacing:-1.25px]">
           Point with your eyes, direct with your voice.
         </p>
 
-        {/* orbit: x434 y425, 411×411; panel top passes through its center */}
-        <div className="absolute left-[434px] top-[425px] h-[411px] w-[411px]" aria-hidden>
+        {/* orbit: x434 y373, 411×411; orb centered on (639.5, 578.5) */}
+        <div className="absolute left-[434px] top-[373px] h-[411px] w-[411px]" aria-hidden>
           <OrbitRing />
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
             <Orb />
           </div>
+          {/* ring mark at 3 o'clock: center +(205.5, 4.5) from orbit center */}
           <div
-            className="absolute flex h-[67px] w-[67px] items-center justify-center rounded-full bg-[#ebedf2] shadow-[0_8px_30px_rgba(0,0,0,0.5),inset_0_0_0_1px_rgba(10,10,10,0.06)]"
+            className="absolute"
             style={{
-              left: "calc(50% + 172px)",
-              top: "calc(50% - 104px)",
+              left: "calc(50% + 205.5px)",
+              top: "calc(50% + 4.5px)",
               transform: "translate(-50%, -50%)",
             }}
           >
-            <MicIcon />
+            <OrbitMark />
           </div>
         </div>
 
-        {/* idea prompt: x258 y631, 764×240 (bottom cropped by stage overflow-hidden) */}
-        <section className="absolute left-[258px] top-[631px] h-[240px] w-[764px]">
-          <div className="rounded-t-[32px] bg-gradient-to-b from-[#666666]/40 via-[#1d1d1d]/90 to-[#1d1d1d] p-6 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px]">
-            <div className="h-[192px] rounded-t-[20px] bg-white/[0.31] px-[35px] pt-[35px] mix-blend-screen backdrop-blur-[40px]">
-              <label htmlFor="idea-prompt" className="sr-only">
-                Describe your idea
-              </label>
-              <textarea
-                id="idea-prompt"
-                rows={1}
-                placeholder="Start talking. Describe your idea and we'll build the first version."
-                className="w-full resize-none bg-transparent font-[family-name:var(--font-inter)] text-[16px] font-normal leading-6 text-[#f5f7f7] outline-none placeholder:text-[#f5f7f7] focus-visible:rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
-              />
-            </div>
-          </div>
-        </section>
+        <IdeaPrompt state="default" />
       </ScaleStage>
     </main>
   );
