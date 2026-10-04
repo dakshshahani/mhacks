@@ -49,6 +49,11 @@ describe("parseScaffoldFiles", () => {
     const missing = FULL.split("### FILE: styles.css")[0] ?? "";
     assert.strictEqual(parseScaffoldFiles(missing), null);
   });
+
+  it("rejects a five-file set with index.html severed mid-tag (max_tokens cut)", () => {
+    const cut = FULL.replace("<html></html>", "<html><body><p>cut off mid-");
+    assert.strictEqual(parseScaffoldFiles(cut), null);
+  });
 });
 
 describe("generateScaffold", () => {
