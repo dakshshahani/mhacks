@@ -45,7 +45,7 @@ function UserIcon() {
 
 export default function SiteHeader() {
   return (
-    <header className="absolute left-[40px] top-[40px] flex h-16 w-[1200px] items-center justify-between">
+    <header className="absolute left-[40px] top-[40px] z-20 flex h-16 w-[1200px] items-center justify-between">
       <Link href="/" aria-label="gaze home" className="flex h-[60px] w-[60px] items-center justify-center">
         <LogoMark />
       </Link>
