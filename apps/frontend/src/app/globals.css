@@ -779,6 +779,8 @@ summary::-webkit-details-marker {
     inset 0 -1px 0 rgb(0 0 0 / .2),
     0 8px 32px rgb(0 0 0 / .37);
 }
+/* overflow must stay visible: the project-menu dropdown renders inside the
+   pill, and hidden clips it to 52px (menu items unreadable). */
 .hifi-project-pill {
   display: flex;
   align-items: stretch;
@@ -786,7 +788,7 @@ summary::-webkit-details-marker {
   min-width: 240px;
   border-radius: 20px;
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 .hifi-back {
   display: grid;
@@ -837,11 +839,12 @@ summary::-webkit-details-marker {
   width: 28px;
   height: 28px;
 }
+/* Figma History Target ~86px circle (25px glyph). */
 .hifi-history-target {
   display: grid;
   place-items: center;
-  width: 60px;
-  height: 60px;
+  width: 86px;
+  height: 86px;
   flex-shrink: 0;
   border-radius: 50%;
   color: var(--ink);
@@ -931,7 +934,9 @@ summary::-webkit-details-marker {
   gap: 12px;
   margin-top: 16px;
 }
-/* Prompt container (Figma 288:12594): card bg, radius 6, p12, gap 8.
+/* Prompt container (Figma 288:12594): card bg #282D35 per Figma, radius 6,
+   p12, gap 8 — the dense glass lives one level up (the floating
+   version-pane), so long lists stay readable without re-styling the cards.
    Click = check out; click the checked-out card again = revert here. */
 .prompt-card {
   background: var(--card);

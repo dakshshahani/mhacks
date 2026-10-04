@@ -212,9 +212,20 @@ export class GitService {
     return { sha, label, at: Date.now() };
   }
 
+  /** Session-branch log, stable across detached view: checking out an
+   *  older snapshot detaches HEAD, but the pane keeps listing newer
+   *  versions (the branch tip never moves on checkout). */
   async history(): Promise<Snapshot[]> {
+    let ref: string | null = null;
     try {
-      const out = await this.git("log", "--format=%H%x1f%s%x1f%ct%x00");
+      ref = await this.sessionBranchName();
+    } catch {
+      ref = null;
+    }
+    try {
+      const out = ref
+        ? await this.git("log", ref, "--format=%H%x1f%s%x1f%ct%x00")
+        : await this.git("log", "--format=%H%x1f%s%x1f%ct%x00");
       // git appends a newline after each record's %x00; strip exactly it.
       const list = out
         .split("\0")

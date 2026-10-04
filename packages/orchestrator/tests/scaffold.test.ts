@@ -94,7 +94,7 @@ describe("generateScaffold", () => {
         messages: Array<{ role: string; content: string }>;
       };
       assert.equal(parsed.model, "glm-test-flash");
-      assert.equal(parsed.reasoning_effort, "medium");
+      assert.equal(parsed.reasoning_effort, "low");
       const [system, user] = parsed.messages;
       assert.ok(system && user);
       assert.equal(system.role, "system");

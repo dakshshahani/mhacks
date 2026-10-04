@@ -54,22 +54,22 @@ export default function SiteHeader() {
       <nav className="flex items-center gap-12" aria-label="Primary">
         <div className="flex items-center gap-5">
           {NAV.map((item) => (
-            <a
+            <Link
               key={item.label}
               href={item.href}
               className="flex h-[52px] w-[116px] items-center justify-center rounded-[12px] text-[20px] font-normal leading-7 text-[#f5f7f7] transition-opacity hover:opacity-75"
             >
               {item.label}
-            </a>
+            </Link>
           ))}
         </div>
-        <a
+        <Link
           href="/account"
           aria-label="Account"
           className="flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px] transition-opacity hover:opacity-85"
         >
           <UserIcon />
-        </a>
+        </Link>
       </nav>
     </header>
   );

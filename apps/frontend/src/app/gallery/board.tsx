@@ -9,6 +9,7 @@
    workspace with the preview URL. */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus } from "lucide-react";
 import {
@@ -80,7 +81,9 @@ export default function GalleryBoard() {
     }
   }, []);
 
+  // Mount fetch: state settles in the async continuation, never sync in the body.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial scan must run on mount
     void load();
   }, [load]);
 
@@ -158,13 +161,13 @@ export default function GalleryBoard() {
         <p className="max-w-[760px] truncate text-[15px] font-normal leading-[22px] text-[#f5f7f7]">
           {openError ? openError : countLabel}
         </p>
-        <a
+        <Link
           href="/new"
           className="flex h-[52px] w-[164px] items-center justify-center gap-2 rounded-[12px] text-[18px] font-normal leading-7 text-[#f5f7f7] transition-opacity hover:opacity-75"
         >
           <Plus size={20} aria-hidden />
           Create new
-        </a>
+        </Link>
       </div>
     </>
   );

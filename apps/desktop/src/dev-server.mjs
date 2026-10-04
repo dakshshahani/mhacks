@@ -821,7 +821,7 @@ async function allocateProjectSlug(prompt, nameHint) {
   throw new Error("could not allocate a project name — try a different idea");
 }
 
-let generatingProject = null; // in-flight generate slug (transport-owned exclusion)
+let generatingSlug = null; // in-flight generate slug (transport-owned exclusion)
 
 /** Async job store: generations outlive the 30s Next rewrite proxy, so the
  *  route returns a jobId immediately and the frontend polls status. */
@@ -832,9 +832,10 @@ const generateJobs = new Map(); // jobId -> { state, name, value, message }
  *  validation, allocation, and the in-flight guard — this never re-checks. */
 async function runGeneration(slug, prompt) {
   console.log(`[projects] generate "${slug}" from brief (${prompt.trim().length} chars)`);
+  // 300s stays under the frontend's 6min poll ceiling (180 × 2s).
   const files = await generateScaffold(prompt, slug, {
     logger: console,
-    timeoutMs: 250000,
+    timeoutMs: 300000,
   });
   if (!files) {
     throw new Error(
@@ -1226,6 +1227,8 @@ async function invokeForProject(project, channel, payload) {
     channel !== "git:undo" &&
     channel !== "git:confirm" &&
     channel !== "git:history" &&
+    channel !== "git:checkout" &&
+    channel !== "git:revertTo" &&
     channel !== "agent:submitEdit" &&
     channel !== "preview:queryElementAt"
   ) {
@@ -1257,6 +1260,14 @@ async function invokeForProject(project, channel, payload) {
       case "git:history": {
         const list = await ctx.git.history();
         return { ok: true, value: list.map((s) => ({ sha: s.sha, label: s.label, at: s.at })) };
+      }
+      case "git:checkout": {
+        const found = await ctx.git.checkout(payload?.sha);
+        return { ok: true, value: { sha: found.sha } };
+      }
+      case "git:revertTo": {
+        const found = await ctx.git.revertTo(payload?.sha);
+        return { ok: true, value: { sha: found.sha } };
       }
       case "agent:submitEdit":
         return await executorSubmitEdit(payload, projectSubmitDeps(ctx));
@@ -1347,13 +1358,13 @@ const server = createServer(async (req, res) => {
       if (prompt.trim().length < 3) {
         throw new Error("describe your idea first — a few words is enough");
       }
-      if (generatingProject !== null) {
-        throw Object.assign(new Error(`already generating "${generatingProject}"`), { status: 409 });
+      if (generatingSlug !== null) {
+        throw Object.assign(new Error(`already generating "${generatingSlug}"`), { status: 409 });
       }
       const nameHint = typeof body.name === "string" ? body.name : undefined;
       const slug = await allocateProjectSlug(prompt, nameHint);
       const jobId = `gen-${Date.now().toString(36)}-${(generateSeq += 1)}`;
-      generatingProject = slug;
+      generatingSlug = slug;
       generateJobs.set(jobId, { state: "generating", name: slug, value: null, message: null });
       console.log(`[projects] generate job ${jobId} for "${slug}"`);
       void (async () => {
@@ -1370,7 +1381,7 @@ const server = createServer(async (req, res) => {
           console.log(`[projects] generate job ${jobId} failed: ${message}`);
           generateJobs.set(jobId, { state: "failed", name: slug, value: null, message });
         } finally {
-          if (generatingProject === slug) generatingProject = null;
+          if (generatingSlug === slug) generatingSlug = null;
         }
       })();
       sendJson(res, 200, { ok: true, value: { jobId, name: slug } });

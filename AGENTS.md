@@ -141,7 +141,9 @@ Tuning these requires a PR that notes the probe run (`npm run probe` on
 | Confirm | commit one edit | `git:confirm` on the pre-commit `sha` (power path; demo path is the undo circle) |
 | New Version | branch for a bigger change | `git:createSnapshot` |
 | Undo | revert last edit | `git:undo` — triggered by ~500ms gaze dwell or click on the undo circle during the 5s window |
-| Version history | timestamps of edits | `git:history` |
+| Version history | timestamps of edits | `git:history` (always the session branch, stable across detached view) |
+| View version | inspect an older snapshot | `git:checkout` — detached HEAD, branch tip untouched |
+| Revert here | drop everything above a snapshot | `git:revertTo` — force-moves the session branch to the `sha` |
 
 Worktrees + branches isolate every edit. Build-gate everything before
 showing diffs to users (may only be skipped on `no-llm` route patches which

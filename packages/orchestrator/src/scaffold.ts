@@ -109,10 +109,11 @@ export async function generateScaffold(
     max_tokens: options.maxTokens ?? MAX_TOKENS,
     temperature: 0.7,
     // GLM burns the whole budget on hidden reasoning by default (probed:
-    // 2000/2000 reasoning tokens, content cut off). Medium keeps the plan
-    // visible in-file (as main.js comments) while staying in the 1–2min demo
-    // budget; "low" verified accepted, medium is the same enum family.
-    reasoning_effort: "medium",
+    // 2000/2000 reasoning tokens, content cut off). Low keeps the plan
+    // visible in-file (as main.js comments) with the fastest round trip;
+    // medium timed out at 250s under provider load (2026-10-04). "Low"
+    // verified accepted, same enum family.
+    reasoning_effort: "low",
     messages: [
       { role: "system", content: buildScaffoldSystemPrompt() },
       { role: "user", content: buildScaffoldUserPrompt(cleanBrief, projectSlug) },
