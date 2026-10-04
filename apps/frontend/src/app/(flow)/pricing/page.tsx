@@ -5,10 +5,9 @@
    Columns EVEN at 495/730/965 per review (Figma's 47/41 gutters
    deliberately evened); all text centered in-column. Prices 20px above
    tier names (Free $0 / Pro $20 / BYOK $8), 7 feature rows, footer 12px.
-   Plan actions are a client island; the table shell stays server. */
+   Plan actions are a client island; shared stage/grid/fade/nav live in
+   (flow)/layout, outside this page's route transition. */
 import { Check, X } from "lucide-react";
-import ScaleStage from "../stage";
-import SiteHeader from "../components/site-header";
 import PlanActions from "./actions";
 import { COLUMNS, COLUMN_WIDTH } from "./columns";
 
@@ -45,17 +44,7 @@ function ValueCell({ cell }: { cell: Cell }) {
 
 export default function PricingPage() {
   return (
-    <main className="min-h-dvh bg-[#0a0a0a] text-white">
-      <ScaleStage>
-        {/* blueprint grid */}
-        <div aria-hidden className="bg-blueprint-grid pointer-events-none absolute inset-0" />
-        {/* header fade: 220px #0A0A0A@0.94 → transparent */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-[220px] bg-gradient-to-b from-[#0a0a0a]/95 to-transparent"
-        />
-        <SiteHeader />
-
+    <>
         {/* page header: x98 y132 */}
         <div className="absolute left-[98px] top-[132px] w-[435px]">
           <h1 className="text-[24px] font-normal leading-[35px] text-[#f5f7f7]">
@@ -141,7 +130,6 @@ export default function PricingPage() {
         </section>
 
         <PlanActions />
-      </ScaleStage>
-    </main>
+    </>
   );
 }

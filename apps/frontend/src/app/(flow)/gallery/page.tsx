@@ -13,8 +13,8 @@ export default function GalleryPage() {
       {/* intro: x112 y125, logo mark inline after "gaz" */}
       <div className="absolute left-[112px] top-[125px] w-[1056px]">
         <h1 className="flex items-center gap-[2px] text-[40px] font-normal leading-[52px] tracking-[-1.2px] text-[#f5f7f7]">
-          Welcome to gaz
-          <LogoMark className="h-[36px]" />
+            Welcome to gaz
+            <LogoMark className="h-[17px] translate-y-[4px]" />
         </h1>
         <p className="mt-[8px] text-[18px] font-normal leading-[26px] text-[#c5cad3]">
           Pick up where you left off, or bring a new idea to life.

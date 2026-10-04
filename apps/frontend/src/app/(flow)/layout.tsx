@@ -1,15 +1,26 @@
 'use client';
 
-/* Flow shell (gallery / new / import): the frame every route here shares —
-   blueprint grid, header fade, SiteHeader — sits OUTSIDE the transition, so
-   a route change never touches it. Only the content that actually changes
-   animates: a soft crossfade with a slight rise, keyed by pathname
-   (AnimatePresence). Frozen under prefers-reduced-motion. */
+/* Flow shell (home / gallery / new / import / about / account / pricing):
+   the shared grid, fade, and SiteHeader sit outside the transition. Only
+   route content changes. Frozen under prefers-reduced-motion. */
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useContext, useRef, type ReactNode } from "react";
+import { LayoutRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import ScaleStage from "../stage";
 import SiteHeader from "../components/site-header";
+
+function FrozenRouter({ children }: { children: ReactNode }) {
+  const context = useContext(LayoutRouterContext);
+  // AnimatePresence retains this keyed subtree for its exit. Keep its router
+  // segment too, or Next swaps in the destination page before exit completes.
+  const frozenContext = useRef(context).current;
+  return (
+    <LayoutRouterContext.Provider value={frozenContext}>
+      {children}
+    </LayoutRouterContext.Provider>
+  );
+}
 
 export default function FlowLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -26,19 +37,33 @@ export default function FlowLayout({ children }: { children: ReactNode }) {
         />
         <SiteHeader />
         {/* Route content: absolute inset-0 coincides with the stage box, so
-            every absolute frame coordinate below keeps working untouched. */}
-        <AnimatePresence initial={false}>
+            every absolute frame coordinate below keeps working untouched.
+            mode="wait" gives a true fade OUT then fade IN (a synced
+            crossfade is invisible on near-black pages). Each phase carries
+            its own direction — old drifts up-and-out, new rises in — so the
+            out/in order is unmistakable. Total ~0.9s. */}
+        <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={pathname}
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: 16, scale: 0.99 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] },
+            }}
+            exit={{
+              opacity: 0,
+              y: -12,
+              scale: 0.99,
+              transition: { duration: 0.45, ease: "easeInOut" },
+            }}
             transition={
-              reduce ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }
+              reduce ? { duration: 0 } : { duration: 0.45, ease: [0.22, 1, 0.36, 1] }
             }
             className="absolute inset-0"
           >
-            {children}
+            <FrozenRouter>{children}</FrozenRouter>
           </motion.div>
         </AnimatePresence>
       </ScaleStage>

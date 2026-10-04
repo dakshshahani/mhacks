@@ -11,7 +11,7 @@ const NAV = [
   { label: "About", href: "/about" },
 ];
 
-export function LogoMark({ className = "" }: { className?: string }) {
+export function LogoMark({ className = "h-[34px]" }: { className?: string }) {
   return (
     <img
       src="/gaze-mark.svg"
@@ -19,7 +19,7 @@ export function LogoMark({ className = "" }: { className?: string }) {
       aria-hidden
       width={34}
       height={37}
-      className={`inline-block h-[34px] w-auto ${className}`}
+      className={`inline-block w-auto ${className}`}
     />
   );
 }
