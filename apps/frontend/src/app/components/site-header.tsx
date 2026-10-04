@@ -11,19 +11,16 @@ const NAV = [
   { label: "About", href: "/about" },
 ];
 
-export function LogoMark() {
+export function LogoMark({ className = "" }: { className?: string }) {
   return (
-    <span
+    <img
+      src="/gaze-mark.svg"
+      alt=""
       aria-hidden
-      className="inline-block -mr-[0.12em] pr-[0.12em] text-[34px] italic leading-none text-transparent"
-      style={{
-        backgroundImage: "radial-gradient(circle at 50% 50%, #4a58bf, #4cbbc1)",
-        backgroundClip: "text",
-        WebkitBackgroundClip: "text",
-      }}
-    >
-      e
-    </span>
+      width={34}
+      height={37}
+      className={`inline-block h-[34px] w-auto ${className}`}
+    />
   );
 }
 

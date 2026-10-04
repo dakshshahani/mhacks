@@ -14,17 +14,14 @@ import VoicePrompt from "./components/voice-prompt";
 
 function LogoMark() {
   return (
-    <span
+    <img
+      src="/gaze-mark.svg"
+      alt=""
       aria-hidden
-      className="inline-block -mr-[0.12em] pr-[0.12em] text-[34px] italic leading-none text-transparent"
-      style={{
-        backgroundImage: "radial-gradient(circle at 50% 50%, #4a58bf, #4cbbc1)",
-        backgroundClip: "text",
-        WebkitBackgroundClip: "text",
-      }}
-    >
-      e
-    </span>
+      width={34}
+      height={37}
+      className="inline-block h-[34px] w-auto"
+    />
   );
 }
 
@@ -163,18 +160,14 @@ export default function Home() {
         <div className="absolute left-1/2 top-[181px] -translate-x-1/2">
           <div className="relative">
             <div aria-hidden className="absolute left-1/2 top-1/2 h-[99px] w-[251px] -translate-x-1/2 -translate-y-1/2 bg-[#f2f2fa]/50 blur-[100px]" />
-            <h1 className="relative text-[72px] font-light italic leading-none tracking-[-0.02em]">
-              gaz
-              <span
-                className="-mr-[0.12em] pr-[0.12em] text-transparent"
-                style={{
-                  backgroundImage: "radial-gradient(circle at 50% 50%, #4a58bf, #4cbbc1)",
-                  backgroundClip: "text",
-                  WebkitBackgroundClip: "text",
-                }}
-              >
-                e
-              </span>
+            <h1 className="relative">
+              <img
+                src="/gaze-full.svg"
+                alt="gaze"
+                width={150}
+                height={56}
+                className="h-[56px] w-auto"
+              />
             </h1>
           </div>
         </div>

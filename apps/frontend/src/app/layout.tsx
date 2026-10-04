@@ -8,6 +8,9 @@ export const metadata: Metadata = {
   title: "gaze — Point with your eyes, direct with your voice",
   description:
     "Point with your eyes, direct with your voice. Describe your idea and we'll build the first version.",
+  icons: {
+    icon: "/gaze-mark.svg",
+  },
 };
 
 const jost = Jost({
