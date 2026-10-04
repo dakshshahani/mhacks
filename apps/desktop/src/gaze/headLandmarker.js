@@ -1,6 +1,9 @@
-import { FaceLandmarker, FilesetResolver } from "/node_modules/@mediapipe/tasks-vision/vision_bundle.mjs";
+import { FaceLandmarker, FilesetResolver } from "../../node_modules/@mediapipe/tasks-vision/vision_bundle.mjs";
 
-const WASM_ROOT = "/node_modules/@mediapipe/tasks-vision/wasm";
+// Relative so the page loads identically over http://localhost (harness)
+// and file:// (packaged shell) — absolute /node_modules only resolves
+// against a server root.
+const WASM_ROOT = "../../node_modules/@mediapipe/tasks-vision/wasm";
 const DEFAULT_MODEL_PATH = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
 function clamp(value, min, max) {
@@ -27,7 +30,7 @@ export function headPoseFromLandmarks(faceLandmarks = []) {
   };
 }
 
-export function startHeadTracking(onPose, { modelAssetPath = DEFAULT_MODEL_PATH } = {}) {
+export function startHeadTracking(onPose, { modelAssetPath = DEFAULT_MODEL_PATH, onError } = {}) {
   let active = true;
   let animationFrame = null;
   let stream = null;
@@ -35,6 +38,70 @@ export function startHeadTracking(onPose, { modelAssetPath = DEFAULT_MODEL_PATH 
   let landmarker = null;
   let lastVideoTime = -1;
   let previousTimestamp = 0;
+  let detectFailures = 0;
+
+  function fail(message) {
+    // Fatal tracking fault: release everything (camera light off, honest
+    // state) and report once through onError. The status line previously
+    // sat at "starting…" forever here — light on, zero poses, zero signal.
+    active = false;
+    if (animationFrame) window.cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+    try {
+      landmarker?.close();
+    } catch {
+      // Already closed.
+    }
+    try {
+      stream?.getTracks().forEach((track) => track.stop());
+    } catch {
+      // Already stopped.
+    }
+    try {
+      video?.remove();
+    } catch {
+      // Already detached.
+    }
+    landmarker = null;
+    stream = null;
+    video = null;
+    try {
+      onError?.(message);
+    } catch {
+      // Status reporting must never break teardown.
+    }
+    throw new Error(message);
+  }
+
+  /** Rejects when `work` doesn't settle in time (play() can pend forever
+   *  under autoplay blocks; frames can stall with a live track when the OS
+   *  holds the camera). Turns "starting…" forever into a named failure. */
+  function withStallTimeout(work, ms, message) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(message));
+      }, ms);
+      Promise.resolve()
+        .then(work)
+        .then(
+          (value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          },
+        );
+    });
+  }
 
   const ready = (async () => {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("camera API unavailable");
@@ -60,17 +127,43 @@ export function startHeadTracking(onPose, { modelAssetPath = DEFAULT_MODEL_PATH 
     Object.assign(video.style, { position: "fixed", width: "1px", height: "1px", opacity: "0", pointerEvents: "none" });
     document.body.append(video);
     video.srcObject = stream;
-    await video.play();
+    try {
+      await withStallTimeout(
+        () => video.play(),
+        8000,
+        "camera playback never started — the browser may be blocking autoplay",
+      );
+      await withStallTimeout(async () => {
+        while (active && video.readyState < 2) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }, 8000, "camera stream has no frames — another app may be holding the camera");
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
+    if (!active) return;
 
     const tick = () => {
       if (!active) return;
       if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
         const timestamp = Math.max(performance.now(), previousTimestamp + 1);
-        const result = landmarker.detectForVideo(video, timestamp);
-        const headPose = headPoseFromLandmarks(result.faceLandmarks?.[0]);
-        previousTimestamp = timestamp;
-        lastVideoTime = video.currentTime;
-        onPose?.(headPose, { trackedConfidence: headPose ? 1 : 0 });
+        let result = null;
+        try {
+          result = landmarker.detectForVideo(video, timestamp);
+          detectFailures = 0;
+        } catch (err) {
+          detectFailures += 1;
+          if (detectFailures >= 10) {
+            fail(`face detection failed repeatedly (${err instanceof Error ? err.message : String(err)})`);
+            return;
+          }
+        }
+        if (result) {
+          const headPose = headPoseFromLandmarks(result.faceLandmarks?.[0]);
+          previousTimestamp = timestamp;
+          lastVideoTime = video.currentTime;
+          onPose?.(headPose, { trackedConfidence: headPose ? 1 : 0 });
+        }
       }
       animationFrame = window.requestAnimationFrame(tick);
     };

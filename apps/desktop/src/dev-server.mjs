@@ -34,7 +34,11 @@ import { decideAndEdit, extractTextSpans } from "./decide.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..");
-const demoRoot = join(appRoot, "demo");
+// Packaged full-app: main seeds a writable demo copy in userData and points
+// the supervised harness at it (the app dir may be read-only; snapshots must
+// be writable). Dev default: the repo template. dist-electron/harness.mjs
+// (esbuild bundle) sits one level below the package root, same as src/.
+const demoRoot = process.env.DEMO_ROOT ?? join(appRoot, "demo");
 const port = Number(process.env.PORT ?? 5173);
 // Harness origin (the proxy lives here, not on project ports). Named
 // distinctly: openProject shadows `port` with the project's picked port.
@@ -1578,7 +1582,18 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    const data = await readFile(join(appRoot, path));
+    let data = await readFile(join(appRoot, path));
+    if (path === "/index.html") {
+      // Electron host seam: the preview <webview>'s guest preload must be an
+      // absolute file:// URL the embedder page can't know. Injected from the
+      // environment (run-electron.mjs sets it); empty in the harness, where
+      // <webview> is an inert unknown element and the iframe path is used.
+      data = Buffer.from(
+        data
+          .toString("utf8")
+          .replace("<!--ELECTRON-GUEST-PRELOAD-->", process.env.ELECTRON_GUEST_PRELOAD ?? ""),
+      );
+    }
     res.writeHead(200, {
       "Content-Type": MIME[extname(path)] ?? "application/octet-stream",
       "Cache-Control": "no-store",

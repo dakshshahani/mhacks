@@ -1177,3 +1177,18 @@ html.blob-on *:not(input):not(textarea):not(select):not([contenteditable]) {
     grid-template-rows: 76px minmax(0, 1fr) auto;
   }
 }
+
+/* Electron frameless shell (Dev C seam: main hides the native title bar and
+   preload sets data-electron-shell on <html>). Headers double as drag
+   regions; every interactive descendant stays clickable. The workspace
+   header sits flush at the viewport top, so it reserves room for the
+   floating traffic lights; landing/gallery headers already offset 40px. */
+html[data-electron-shell] header {
+  -webkit-app-region: drag;
+}
+html[data-electron-shell] header :is(a, button, input, summary, details, select, textarea, [role="button"]) {
+  -webkit-app-region: no-drag;
+}
+html[data-electron-shell] .workspace-header {
+  padding-left: 76px;
+}

@@ -4,6 +4,22 @@
 // decideAndEdit (Jev -> composeEditRequest -> agent:submitEdit) in Node.
 
 import { createGazeController } from "./gaze/controller.js";
+import {
+  ensureElectronPreview,
+  initShellPreview,
+  isWebviewElement,
+  refreshShellPreview,
+  reloadWebview,
+  webviewFacade,
+} from "./preview-embed.js";
+import {
+  decideAndEdit as transportDecideAndEdit,
+  ensureMediaAccess,
+  invoke as transportInvoke,
+  pushTranscript,
+  subscribeEvents,
+  transcribeAudio as transportTranscribe,
+} from "./transport.js";
 
 const statusEl = document.querySelector("#status");
 const micEl = document.querySelector("#mic");
@@ -13,10 +29,23 @@ const historyEl = document.querySelector("#history");
 const transcriptEl = document.querySelector("#transcript");
 const pointEl = document.querySelector("#point");
 
+// Electron shell: the preview is a <webview> (same URL, real probe via the
+// guest bridge) instead of the harness <iframe>. Null on the harness path.
+// Initialized once: React-free shell, no re-mounts to go stale on.
+const previewWebview = ensureElectronPreview();
+
 // Looked up lazily at use time: React mounts the iframe after connecting,
 // and re-renders can replace the node — a module-load const goes stale and
 // the post-edit reload silently no-ops (status says Done, pixels never move).
 function previewFrame() {
+  return previewWebview ?? document.querySelector("#preview");
+}
+
+/** Element the gaze pump probes: the webview facade in the shell (its
+ *  contentWindow.postMessage routes through the guest bridge), else the raw
+ *  iframe. Same coordinate contract either way. */
+function gazePreview() {
+  if (previewWebview && isWebviewElement(previewWebview)) return webviewFacade(previewWebview);
   return document.querySelector("#preview");
 }
 
@@ -28,6 +57,16 @@ function previewFrame() {
 function reloadPreview() {
   const f = previewFrame();
   if (!f || !f.src) return;
+  if (previewWebview && f === previewWebview) {
+    lastFrame = null;
+    lastPoint = null;
+    // Shell: main regenerates the data: URL preview. Harness fallback
+    // (unreachable — the webview only shows in the shell): loadURL swap.
+    void refreshShellPreview(f).then((handled) => {
+      if (!handled) reloadWebview(f);
+    });
+    return;
+  }
   lastFrame = null;
   lastPoint = null;
   const swap = () => {
@@ -117,12 +156,9 @@ export function hideFail() {
 }
 
 export async function invoke(channel, req) {
-  const res = await fetch("/api/invoke", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ channel, req, project: currentProject() }),
-  });
-  return res.json();
+  // Contract channels, either transport. The shell is template-only: main
+  // ignores project (demo-scoped services); the harness still scopes by it.
+  return transportInvoke(channel, req, currentProject());
 }
 
 // Workspace project from the URL (/demo vs /finance). The server scopes
@@ -142,23 +178,19 @@ let lastFrame = null;
 
 export async function decideAndEdit(transcript, x, y) {
   let res;
-  const body = { transcript, x, y, project: currentProject() };
+  const body = { transcript, x, y };
   if (lastFrame && Array.isArray(lastFrame.candidates) && lastFrame.candidates.length > 0) {
     body.frame = lastFrame;
   }
   try {
-    res = await fetch("/api/decide-and-edit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    res = await transportDecideAndEdit(body, currentProject());
   } catch {
     // Server unreachable mid-send: release the mic so the chip can't strand
     // in listening/processing with no pipeline behind it.
     await invoke("speech:stop", undefined);
     return { status: 0, body: { ok: false, code: "unknown", message: "server unreachable" } };
   }
-  return { status: res.status, body: await res.json() };
+  return res;
 }
 
 // Human-readable narration of what an op does (server statusLines carry the
@@ -408,37 +440,25 @@ function renderPipeline(state) {
   prevStage = state.stage;
 }
 
-const events = new EventSource("/api/events");
-let sseAlive = false;
-events.onopen = () => {
-  sseAlive = true;
-};
-events.onerror = () => {
-  // SSE died (harness restart, proxy blip). EventSource reconnects on its
-  // own; say so instead of silently freezing the mic chip / send gating —
-  // both now update optimistically/locally and merely reconcile over SSE.
-  if (sseAlive) {
-    sseAlive = false;
-    setStatus("live updates reconnecting… (mic + send keep working; reload if stuck)");
-  }
-};
-events.onmessage = (e) => {
-  let msg;
-  try {
-    msg = JSON.parse(e.data);
-  } catch {
-    return;
-  }
-  if (msg.type === "pipeline") renderPipeline(msg.state);
-  else if (msg.type === "speech-state") {
-    serverMicState = msg.state;
-    gazeController?.setSpeechState(msg.state);
-    setMic(msg.state);
+// Live pipeline/speech stream: native bridge events in the shell, SSE in the
+// harness. Same dispatch — the renderers below never know which.
+subscribeEvents({
+  onPipeline: (state) => renderPipeline(state),
+  onSpeechState: (state) => {
+    serverMicState = state;
+    gazeController?.setSpeechState(state);
+    setMic(state);
     renderMicButton();
-  } else if (msg.type === "speech-transcript" && transcriptEl && !msg.event.isFinal) {
-    transcriptEl.value = msg.event.text;
-  }
-};
+  },
+  onTranscript: (event) => {
+    if (transcriptEl && !event.isFinal) transcriptEl.value = event.text;
+  },
+  onStreamDown: () => {
+    // Harness-only: SSE died (restart, proxy blip). The bridge doesn't drop.
+    // Mic + send keep working locally; reload if stuck.
+    setStatus("live updates reconnecting… (mic + send keep working; reload if stuck)");
+  },
+});
 
 // Zoom-style mic: one button, bound to the server mic state (single source
 // of truth over SSE — never a local guess). Click to unmute, click again to
@@ -459,6 +479,9 @@ export function renderMicButton() {
 
 /** Start one recognizer turn inside the current continuous mic session. */
 async function beginMicCapture() {
+  // OS prompt first (shell-only; harness no-ops): without the TCC grant the
+  // recorder + recognizer capture silence and fail opaquely.
+  await ensureMediaAccess("microphone");
   const r = await invoke("speech:start", undefined);
   if (!r.ok) {
     micSessionActive = false;
@@ -544,11 +567,7 @@ export async function finalizeAndSend(text, resumeMic = false) {
   stopWebSpeech();
   sessionFinal = "";
   sessionInterim = "";
-  fetch("/api/transcript", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: t, isFinal: true }),
-  }).catch(() => undefined);
+  pushTranscript(t, true);
   if (transcriptEl) transcriptEl.value = t;
   updateSendButton();
   await sendEdit(t);
@@ -629,11 +648,7 @@ function startWebSpeechAttempt() {
           });
         }
       } else if (interim.trim()) {
-        fetch("/api/transcript", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: interim.trim(), isFinal: false }),
-        }).catch(() => undefined);
+        pushTranscript(interim.trim(), false);
       }
     };
     rec.onerror = (e) => {
@@ -782,14 +797,7 @@ export function stopRecorder() {
 }
 
 export async function transcribeAudio(blob) {
-  const res = await fetch("/api/transcribe", {
-    method: "POST",
-    headers: { "Content-Type": blob.type || "audio/webm" },
-    body: blob,
-  });
-  const body = await res.json();
-  if (!body.ok) throw new Error(body.message ?? body.code ?? "transcribe failed");
-  return body.value.text;
+  return transportTranscribe(blob);
 }
 
 document.querySelector("#send")?.addEventListener("click", () => {
@@ -817,34 +825,41 @@ undoEl?.addEventListener("click", async () => {
 // uses it as the gaze point for preview:queryElementAt. The component under
 // the click is identified immediately (same probe Jev disambiguates on send)
 // so the user sees WHAT was hit, not just raw coordinates.
+//
+// Two transports, one handler: the harness iframe posts preview-frame to
+// parent (this page); the Electron webview's guest bridge forwards the same
+// shape via sendToHost → ipc-message. Both arrive WITH the frame, so
+// identification needs no server roundtrip. Stored for the send body.
+export function handlePreviewFrame(data) {
+  lastPoint = { x: data.x, y: data.y };
+  const f = data.frame;
+  if (!f || !Array.isArray(f.candidates) || f.candidates.length === 0) {
+    if (pointEl) pointEl.textContent = `point ${data.x},${data.y} — no component here`;
+    setStatus(`Clicked empty space at ${data.x},${data.y} — try clicking an element`);
+    return;
+  }
+  lastFrame = f;
+  gazeController?.acceptExternalFrame(f, { x: data.x, y: data.y });
+  const locked =
+    f.lockedTarget ??
+    [...f.candidates]
+      .reverse()
+      .find((c) => {
+        const r = c.boundingRect;
+        return (
+          data.x >= r.x && data.x <= r.x + r.width && data.y >= r.y && data.y <= r.y + r.height
+        );
+      }) ??
+    f.candidates[0];
+  const label = locked.componentName ?? locked.id;
+  const others = f.candidates.length > 1 ? ` · +${f.candidates.length - 1} nearby` : "";
+  if (pointEl) pointEl.textContent = `${label}${others} — send an edit to apply`;
+  setStatus(`Target: ${label} — describe the change, then send`);
+}
+
 window.addEventListener("message", (e) => {
   if (e.data && e.data.type === "preview-frame") {
-    // Foreign live probe (probe.js): the frame arrives WITH the click, so
-    // identification needs no server roundtrip. Stored for the send body.
-    lastPoint = { x: e.data.x, y: e.data.y };
-    const f = e.data.frame;
-    if (!f || !Array.isArray(f.candidates) || f.candidates.length === 0) {
-      if (pointEl) pointEl.textContent = `point ${e.data.x},${e.data.y} — no component here`;
-      setStatus(`Clicked empty space at ${e.data.x},${e.data.y} — try clicking an element`);
-      return;
-    }
-    lastFrame = f;
-    gazeController?.acceptExternalFrame(f, { x: e.data.x, y: e.data.y });
-    const locked =
-      f.lockedTarget ??
-      [...f.candidates]
-        .reverse()
-        .find((c) => {
-          const r = c.boundingRect;
-          return (
-            e.data.x >= r.x && e.data.x <= r.x + r.width && e.data.y >= r.y && e.data.y <= r.y + r.height
-          );
-        }) ??
-      f.candidates[0];
-    const label = locked.componentName ?? locked.id;
-    const others = f.candidates.length > 1 ? ` · +${f.candidates.length - 1} nearby` : "";
-    if (pointEl) pointEl.textContent = `${label}${others} — send an edit to apply`;
-    setStatus(`Target: ${label} — describe the change, then send`);
+    handlePreviewFrame(e.data);
     return;
   }
   if (e.data && e.data.type === "preview-click") {
@@ -911,6 +926,7 @@ window.mhacks = {
   sessionText,
   renderMicButton,
   identifyPoint,
+  handlePreviewFrame,
   startRecorder,
   stopRecorder,
   discardRecorder,
@@ -920,6 +936,7 @@ window.mhacks = {
 };
 
 gazeController = createGazeController({
+  getPreview: gazePreview,
   onFrame: ({ frame, previewPoint }) => {
     lastFrame = frame;
     if (previewPoint) lastPoint = previewPoint;
@@ -941,3 +958,24 @@ gazeController = createGazeController({
   },
 });
 gazeController.start();
+
+// Shell camera prompt (harness no-ops): head tracking getUserMedia needs the
+// OS grant, otherwise the tracker dies silently and only click-override
+// remains. Asked once here; the OS remembers the answer per app.
+void ensureMediaAccess("camera");
+
+// Shell startup handshake: set the guest preload, then ask main to load the
+// generated preview (main pends until the guest exists — race-free).
+void initShellPreview(previewWebview);
+
+// Electron shell: guest-bridge messages from the preview webview. Scoped to
+// our own webview element by construction (no origin/source check possible
+// or needed — sendToHost only fires from this guest).
+if (previewWebview) {
+  previewWebview.addEventListener("ipc-message", (e) => {
+    const arg = e.args?.[0];
+    if (!arg) return;
+    if (e.channel === "preview-frame") handlePreviewFrame(arg);
+    else if (e.channel === "preview-gaze-frame") gazeController?.acceptProbeReply(arg);
+  });
+}

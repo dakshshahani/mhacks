@@ -1,5 +1,8 @@
 node_modules/
 dist/
+dist-electron/
+release/
+apps/desktop/staged-frontend/
 .vite/
 .DS_Store
 .env
