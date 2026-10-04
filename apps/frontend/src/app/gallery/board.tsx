@@ -55,7 +55,6 @@ function TileCard({
   onSelect: () => void;
 }) {
   const tipId = `project-tip-${project.id}`;
-  const runnable = project.runnable !== false;
   return (
     <button
       type="button"
@@ -65,7 +64,7 @@ function TileCard({
       aria-describedby={tipId}
       className={`group relative flex h-[191px] w-[273px] shrink-0 flex-col rounded-[16px] bg-[#1d1d1d] text-left outline-none transition focus-visible:ring-2 focus-visible:ring-white/70 ${
         selected ? "ring-2 ring-white/70" : ""
-      } ${!runnable ? "opacity-60" : ""} ${dimmed && !opening ? "opacity-40" : ""} disabled:cursor-wait`}
+      } ${dimmed && !opening ? "opacity-40" : ""} disabled:cursor-wait`}
     >
       <span className="relative block h-[137px] w-[273px] overflow-hidden rounded-t-[16px]">
         <span
@@ -94,11 +93,6 @@ function TileCard({
         >
           {tooltipFresh(project)}
         </span>
-        {!runnable && (
-          <span className="absolute right-[12px] top-[12px] rounded-[6px] bg-black/60 px-[8px] py-[4px] text-[12px] font-normal leading-4 text-[#c5cad3]">
-            No dev script
-          </span>
-        )}
       </span>
       <span className="flex h-[54px] items-center gap-[6px] px-[12px]">
         <ArrowLeft
@@ -261,7 +255,7 @@ export default function GalleryBoard() {
                     No runnable projects found in ~/Documents/Projects.
                   </p>
                   <p className="max-w-[560px] text-[14px] leading-5 text-[#c5cad3]">
-                    Every folder shows up here — to open one it needs a package.json with a dev script. Nested folders one level down are included.
+                    To open a folder here it needs a package.json with a dev script.
                   </p>
                 </>
               ) : (

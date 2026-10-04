@@ -15,9 +15,6 @@ export interface Project {
   /** Root mtime epoch ms — drives the hover tooltip's freshness copy.
    *  Absent only for pre-timestamp custom entries (treated as now). */
   editedAt?: number;
-  /** False when the scan listed the folder but it can't be opened
-   *  (no package.json / dev script). Absent means runnable (legacy). */
-  runnable?: boolean;
 }
 
 export interface ActiveProject {
@@ -34,7 +31,6 @@ interface ScanEntry {
   path: string;
   framework: string;
   mtimeMs: number;
-  runnable?: boolean;
 }
 
 function harnessError(action: string, body: unknown): Error {
@@ -102,7 +98,6 @@ export async function fetchProjects(): Promise<Project[]> {
     framework: e.framework,
     lastEdited: relativeEdited(e.mtimeMs),
     editedAt: e.mtimeMs,
-    runnable: e.runnable !== false,
   }));
 }
 

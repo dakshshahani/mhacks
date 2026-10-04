@@ -41,7 +41,7 @@ export default function NewProjectPage() {
         <section aria-label="Starting points" className="absolute left-[292px] top-[365px] h-[288px] w-[696px]">
           <div className="absolute inset-0 flex gap-[24px]">
             <OptionCard
-              href="/edit"
+              href="/"
               icon={<Plus size={24} aria-hidden />}
               title="Start new project"
               description="Turn an idea into a first version. Just describe what you have in mind."
