@@ -6,3 +6,4 @@
 		}
 	}
 }
+npm uninstall -g @openai/codex

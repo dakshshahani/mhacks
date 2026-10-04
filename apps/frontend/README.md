@@ -1,34 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# gaze frontend
 
-## Getting Started
+Next.js frontend for the look → speak → change workspace. The landing page's
+blueprint grid, Jost typography, and indigo/teal glass aesthetic carry into the
+project editor, following Figma's Lofi frame `14:848`.
 
-First, run the development server:
+Run `pnpm dev` in this directory. Open `/projects` to select the demo or enter
+a project name and a running localhost URL. Projects open at `/{projectname}`;
+the preview URL stays in the query string so reloads preserve the connection.
+The project dev server must permit iframe embedding.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+For `/demo`, also run `pnpm dev` from `apps/desktop` in another terminal. The
+frontend proxies the existing harness at `http://127.0.0.1:5173` (override with
+`HARNESS_URL` before starting Next.js). The workspace reuses the harness client
+for click selection, browser speech, editing, undo, and version history; full
+page navigation resets that client's subscriptions. Other localhost projects
+support preview only because the backend currently edits the fixed demo tree.
+The UI does not simulate source editing or versions for custom projects.
+
+Checks:
+
+```sh
+pnpm exec tsc --noEmit
+node --experimental-strip-types --test src/app/project-url.test.mjs
+pnpm lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The landing page currently has existing `no-html-link-for-pages` lint errors.
