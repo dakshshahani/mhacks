@@ -37,6 +37,8 @@ const OP_BLURBS: Record<string, string> = {
   "set-radius": "Change corner rounding",
   "set-spacing": "Change spacing or padding",
   "set-align": "Change text alignment",
+  "set-weight": "Change font weight (regular, medium, bold)",
+  "set-size": "Change text size (smaller, bigger)",
   hide: "Hide the element",
   "swap-text": "Replace the element text",
   none: "No catalog op fits; custom code needed",
@@ -56,6 +58,11 @@ const PARAMS = [
   "left",
   "center",
   "right",
+  "medium",
+  "bold",
+  "xs",
+  "base",
+  "xl",
   "none",
 ] as const;
 

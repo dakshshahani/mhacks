@@ -9,6 +9,8 @@ import {
   RADIUS_TOKENS,
   SPACING_TOKENS,
   ALIGN_TOKENS,
+  WEIGHT_TOKENS,
+  SIZE_TOKENS,
 } from "@mhacks/contracts";
 
 export const COLOR_CLASS: Record<string, string> = {
@@ -37,6 +39,20 @@ export const ALIGN_CLASS: Record<string, string> = {
   justify: "text-justify",
 };
 
+export const WEIGHT_CLASS: Record<string, string> = {
+  normal: "font-normal",
+  medium: "font-medium",
+  bold: "font-bold",
+};
+
+export const SIZE_CLASS: Record<string, string> = {
+  xs: "text-xs",
+  sm: "text-sm",
+  base: "text-base",
+  lg: "text-lg",
+  xl: "text-xl",
+};
+
 const RADIUS_VALUES = new Set<string>([...RADIUS_TOKENS]);
 const SPACING_VALUES: Set<string> = new Set([
   "p-2",
@@ -48,6 +64,19 @@ const SPACING_VALUES: Set<string> = new Set([
 ]);
 const ALIGN_VALUES = new Set<string>([...ALIGN_TOKENS]);
 const COLOR_VALUES = new Set<string>([...COLOR_TOKENS]);
+// Class names stripped when swapping (managed set plus the common sibling so
+// weights never stack: font-bold on top of font-semibold would fight).
+const WEIGHT_VALUES = new Set<string>(["font-normal", "font-medium", "font-semibold", "font-bold"]);
+// Managed sizes plus the larger display rungs so swaps replace, not stack.
+const SIZE_VALUES = new Set<string>([
+  "text-xs",
+  "text-sm",
+  "text-base",
+  "text-lg",
+  "text-xl",
+  "text-2xl",
+  "text-3xl",
+]);
 
 /** Exhaustiveness guard: adding an op to the EditOp union without a case
  *  here is a COMPILE error (op isn't never), not a silent undefined return
@@ -66,6 +95,10 @@ export function isTier1Executable(op: string | null, param: string | null): bool
   if (op === "set-spacing")
     return typeof param === "string" && (SPACING_TOKENS as readonly string[]).includes(param);
   if (op === "set-align") return typeof param === "string" && ALIGN_VALUES.has(param);
+  if (op === "set-weight")
+    return typeof param === "string" && (WEIGHT_TOKENS as readonly string[]).includes(param);
+  if (op === "set-size")
+    return typeof param === "string" && (SIZE_TOKENS as readonly string[]).includes(param);
   return false;
 }
 
@@ -121,6 +154,14 @@ export function applyTier1Edit(
       return upsertClass(fileText, line, (cls) =>
         swapClassToken(cls, next, new Set(Object.values(ALIGN_CLASS))),
       );
+    }
+    case "set-weight": {
+      const next = WEIGHT_CLASS[op.param] ?? `font-${op.param}`;
+      return upsertClass(fileText, line, (cls) => swapClassToken(cls, next, WEIGHT_VALUES));
+    }
+    case "set-size": {
+      const next = SIZE_CLASS[op.param] ?? `text-${op.param}`;
+      return upsertClass(fileText, line, (cls) => swapClassToken(cls, next, SIZE_VALUES));
     }
     case "hide": {
       return upsertClass(fileText, line, (cls) => {

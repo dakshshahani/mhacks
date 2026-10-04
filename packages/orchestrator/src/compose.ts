@@ -9,6 +9,8 @@ import {
   RADIUS_TOKENS,
   SPACING_TOKENS,
   ALIGN_TOKENS,
+  WEIGHT_TOKENS,
+  SIZE_TOKENS,
   POLICY,
   type Decision,
   type EditOp,
@@ -34,6 +36,8 @@ const TOKEN_SETS = {
   "set-radius": RADIUS_TOKENS,
   "set-spacing": SPACING_TOKENS,
   "set-align": ALIGN_TOKENS,
+  "set-weight": WEIGHT_TOKENS,
+  "set-size": SIZE_TOKENS,
 } as const;
 type TokenOp = keyof typeof TOKEN_SETS;
 
