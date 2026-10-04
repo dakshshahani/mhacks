@@ -7,6 +7,7 @@ import { createGazeController } from "./gaze/controller.js";
 import {
   ensureElectronPreview,
   initShellPreview,
+  isElectronShell,
   isWebviewElement,
   refreshShellPreview,
   reloadWebview,
@@ -621,6 +622,15 @@ export function startWebSpeech() {
 // One attempt; separated so a retry doesn't wipe the retry counter or the
 // already-captured session text.
 function startWebSpeechAttempt() {
+  // Electron shell: Web Speech is Google-backed and Electron builds carry
+  // no API key, so the recognizer ALWAYS fails here (network error after a
+  // pointless retry). Skip it outright — the parallel Scribe recording
+  // (startRecorder, already running) is the real path: speak, release, and
+  // micOff transcribes. Browsers keep the Web Speech primary below.
+  if (isElectronShell()) {
+    setStatus("Listening… (scribe recording — speak, then release)");
+    return;
+  }
   const Ctor = webSpeechCtor();
   if (!Ctor) {
     setStatus("Listening… (scribe fallback recording — speak, then mic off)");

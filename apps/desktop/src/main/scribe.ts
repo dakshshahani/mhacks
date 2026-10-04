@@ -4,6 +4,7 @@
 // caps); the harness copy stays for browser dev.
 
 import type { IpcResult } from "@mhacks/contracts";
+import { getElevenLabsKey } from "./envKey";
 
 const SCRIBE_ENDPOINT = "https://api.elevenlabs.io/v1/speech-to-text";
 const SCRIBE_MODEL = "scribe_v2";
@@ -13,7 +14,7 @@ export async function transcribeWithScribe(
   audio: Uint8Array,
   mimeType: string,
 ): Promise<IpcResult<{ text: string }>> {
-  const apiKey = process.env.ELEVENLABS_API_KEY ?? "";
+  const apiKey = getElevenLabsKey();
   if (apiKey.length === 0) {
     return { ok: false, code: "not-ready", message: "no ElevenLabs key (speech fallback unavailable)" };
   }

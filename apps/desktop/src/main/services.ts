@@ -31,6 +31,7 @@ import {
   generateNarrowDiff,
   verifyDecision,
 } from "@mhacks/orchestrator";
+import { getElevenLabsKey } from "./envKey";
 
 export type ShellEvent =
   | { type: "pipeline"; state: PipelineState }
@@ -181,7 +182,7 @@ export async function createServices(
     { kind: "web-speech", isAvailable: () => true },
     {
       kind: "scribe",
-      isAvailable: () => (process.env.ELEVENLABS_API_KEY ?? "").length > 0,
+      isAvailable: () => getElevenLabsKey().length > 0,
     },
   ]);
   const pipeline = new PipelineMachine();
