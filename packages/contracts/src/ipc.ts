@@ -30,6 +30,11 @@ export interface IpcChannelMap {
   "git:createSnapshot": { req: { label: string }; res: IpcResult<{ sha: string }> };
   "git:undo": { req: undefined; res: IpcResult<{ sha: string }> };
   "git:confirm": { req: { sha: string }; res: IpcResult<{ sha: string }> };
+  // History pane: first click checks out the snapshot (working tree only,
+  // history untouched); clicking the checked-out entry again reverts to it
+  // and drops everything above it from history.
+  "git:checkout": { req: { sha: string }; res: IpcResult<{ sha: string }> };
+  "git:revertTo": { req: { sha: string }; res: IpcResult<{ sha: string }> };
   "git:history": {
     req: undefined;
     res: IpcResult<{ sha: string; label: string; at: number }[]>;

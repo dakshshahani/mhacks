@@ -5,7 +5,7 @@
 import type { CalibrationStatus } from "@mhacks/contracts";
 import type { EditRequest } from "@mhacks/contracts";
 import type { IpcChannelMap, IpcResult } from "@mhacks/contracts";
-import type { FileGitService } from "./git";
+import type { GitService } from "./git";
 import { submitEdit, type ExecutorDeps } from "./executor";
 import type { PreviewHost } from "./preview";
 import type { SpeechService } from "./speech";
@@ -13,7 +13,7 @@ import type { SpeechService } from "./speech";
 export type InvokeChannel = Exclude<keyof IpcChannelMap, "pipeline:state" | "speech:transcript" | "speech:state">;
 
 export interface RouterDeps {
-  git: FileGitService;
+  git: GitService;
   preview: PreviewHost;
   speech: SpeechService;
   executorDeps: Omit<ExecutorDeps, "git">;
@@ -93,6 +93,19 @@ export class IpcRouter {
           ok: true,
           value: list.map((s) => ({ sha: s.sha, label: s.label, at: s.at })),
         } as never;
+      }
+      case "git:checkout":
+      case "git:revertTo": {
+        const { sha } = req as { sha: string };
+        try {
+          const found =
+            channel === "git:checkout"
+              ? await this.deps.git.checkout(sha)
+              : await this.deps.git.revertTo(sha);
+          return { ok: true, value: { sha: found.sha } } as never;
+        } catch (err) {
+          return { ok: false, code: "unknown", message: String(err) } as never;
+        }
       }
       case "speech:start": {
         const r = this.deps.speech.start();

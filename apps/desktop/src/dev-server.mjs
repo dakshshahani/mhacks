@@ -1,5 +1,5 @@
 // Browser-harness server (G2-G3).
-// REAL: HTTP, FileGitService, executor + Tier-1, PreviewHost, SpeechService,
+// REAL: HTTP, GitService, executor + Tier-1, PreviewHost, SpeechService,
 // Dev B pipeline (Jev or mockJev -> composeEditRequest -> agent:submitEdit),
 // Flash-Lite narrow diffs, template build gate, file-watch HMR truth.
 // STUBBED at the boundary (injectable, Dev A seam): the gaze probe (canned
@@ -16,7 +16,7 @@ import { execFile } from "node:child_process";
 import { join, extname, dirname, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { FileGitService } from "@mhacks/shell";
+import { GitService } from "@mhacks/shell";
 import { PreviewHost } from "@mhacks/shell";
 import { SpeechService } from "@mhacks/shell";
 import { IpcRouter } from "@mhacks/shell";
@@ -40,7 +40,7 @@ const port = Number(process.env.PORT ?? 5173);
 // distinctly: openProject shadows `port` with the project's picked port.
 const HARNESS_PORT = port;
 
-const git = new FileGitService(demoRoot);
+const git = new GitService(demoRoot);
 const preview = new PreviewHost();
 // Harness stub probe — Dev A seam: replace with the WebGazer queryElementAt
 // when it lands. Shape stays GazeFrame either way. Emulates a real prober:
@@ -505,7 +505,7 @@ let decideActive = 0;
 // ---------------------------------------------------------------------------
 // Project supervisor (gallery integration).
 // The demo pipeline above stays pointed at demoRoot always: the canned probe,
-// template build gate, executor resolveRoot and FileGitService are demo-only
+// template build gate, executor resolveRoot and GitService are demo-only
 // (gaze→edit on foreign repos is deferred — preview first). Foreign projects
 // get process supervision + preview URL only, via this separate manager.
 // Single-active: opening a project stops the previous one.
@@ -880,7 +880,7 @@ async function projectContextFor(name) {
     name,
     root,
     framework,
-    git: new FileGitService(root),
+    git: new GitService(root),
     projectContext:
       `${framework} project. Top-level: ${topLevel.slice(0, 1500)}. ` +
       "Work only within these files; reuse styling already present plus the " +

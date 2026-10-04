@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Script from 'next/script';
-import { ArrowUp, ChevronDown, ChevronLeft, ExternalLink, FolderOpen, History, Mic, Plus, RotateCcw, Settings, UserRound, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronUp, ExternalLink, FolderOpen, History, Mic, Plus, RotateCcw, Settings, X } from 'lucide-react';
 import { projectHref } from './project-url';
 
 export default function Workspace({ name, preview, demo, initialError }: { name: string; preview: string; demo: boolean; initialError: string }) {
@@ -48,31 +48,37 @@ export default function Workspace({ name, preview, demo, initialError }: { name:
   }, [demo, name, preview, retry]);
 
   return (
-    <main className={`project-workspace bg-blueprint-grid ${historyOpen ? 'with-history' : ''}`}>
-      <header className="workspace-header" data-gaze-overlay>
-        <div className="workspace-project workspace-glass">
-          <a href="/gallery" className="icon-button" aria-label="Back to projects"><ChevronLeft size={18} /></a>
-          <span className="project-divider" />
-          <details className="project-menu"><summary><span className="project-name">{name}</span><ChevronDown size={14} /></summary><div className="workspace-menu workspace-glass"><a href="/gallery"><FolderOpen size={16} /> View projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Project settings</button></div></details>
-        </div>
-        <div className="workspace-view-label"><span className="status-dot" />{demo ? 'Live playground' : 'Local preview'}</div>
-        <button className={`icon-button workspace-glass history-toggle ${historyOpen ? 'is-active' : ''}`} aria-label="Version history" aria-expanded={historyOpen} aria-controls="version-history" onClick={() => setHistoryOpen(!historyOpen)}><History size={20} /></button>
-      </header>
-
-      <section className="preview-area" aria-label="Project preview">
-        <div className="preview-address"><span className="status-dot" /><span>{demo ? 'localhost:5173 / demo' : preview || 'No preview connected'}</span><div><button className="icon-button" aria-label="Reload preview" disabled={!preview} onClick={() => { if (frame.current) frame.current.src = preview; }}><RotateCcw size={14} /></button>{preview && <a href={preview} target="_blank" rel="noreferrer" className="icon-button" aria-label="Open preview in a new tab"><ExternalLink size={14} /></a>}</div></div>
-        {preview && connected ? <iframe ref={frame} id="preview" title={`${name} live preview`} src={preview} /> : <div className="preview-empty"><span className="empty-orbit"><span className="workspace-brand">e</span></span><h1>{demo ? 'Your playground is almost ready.' : 'A space for your next idea.'}</h1><p>{initialError || connectionError || (demo ? 'Connecting to the live preview…' : preview ? 'This preview is not supervised — open the project from the gallery to start its server and enable editing.' : 'Connect your localhost dev server to see your project here.')}</p>{connectionError ? <button className="workspace-primary" onClick={() => setRetry(retry + 1)}>Reconnect</button> : !demo && preview && !connected ? <a className="workspace-primary" href="/gallery">Open gallery</a> : !demo && !preview && <button className="workspace-primary" onClick={() => settings.current?.showModal()}>Connect preview</button>}</div>}
+    <main className={`bg-blueprint-grid hifi-project ${historyOpen ? 'pane-open' : ''}`}>
+      {/* The entire screen is the viewport (the project's localhost fills it);
+          every chrome element floats on top of it. No window-in-window. */}
+      <section className="viewport" aria-label="Project preview">
+        {preview && connected
+          ? <iframe ref={frame} id="preview" title={`${name} live preview`} src={preview} />
+          : <div className="preview-empty"><span className="empty-orbit"><span className="workspace-brand">e</span></span><h1>{demo ? 'Your playground is almost ready.' : 'A space for your next idea.'}</h1><p>{initialError || connectionError || (demo ? 'Connecting to the live preview…' : preview ? 'This preview is not supervised — open the project from the gallery to start its server and enable editing.' : 'Connect your localhost dev server to see your project here.')}</p>{connectionError ? <button className="workspace-primary" onClick={() => setRetry(retry + 1)}>Reconnect</button> : !demo && preview && !connected ? <a className="workspace-primary" href="/gallery">Open gallery</a> : !demo && !preview && <button className="workspace-primary" onClick={() => settings.current?.showModal()}>Connect preview</button>}</div>}
       </section>
 
-      <aside id="version-history" className="history-panel workspace-glass" hidden={!historyOpen} data-gaze-overlay>
-        <div className="history-heading"><div><p className="workspace-eyebrow">Your progress</p><h2>Version history</h2></div><button className="icon-button" aria-label="Close history" onClick={() => setHistoryOpen(false)}><X size={18} /></button></div>
-        <button id="new-version" className="save-version" disabled={!connected}><Plus size={16} /> New version</button>
+      <header className="workspace-header hifi-header" data-gaze-overlay>
+        <div className="workspace-project hifi-project-pill">
+          <a href="/gallery" className="hifi-back" aria-label="Back to projects"><ChevronLeft size={20} /></a>
+          <details className="project-menu hifi-name-menu"><summary><span className="project-name">{name}</span><ChevronDown size={14} /></summary><div className="workspace-menu hifi-menu"><a href="/gallery"><FolderOpen size={16} /> View projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Project settings</button></div></details>
+        </div>
+        <div className="hifi-address-hud"><span className="status-dot" /><span className="hifi-address-text">{demo ? 'localhost:5173 / demo' : preview || 'No preview connected'}</span><button className="icon-button hifi-hud-button" aria-label="Reload preview" disabled={!preview} onClick={() => { if (frame.current) frame.current.src = preview; }}><RotateCcw size={14} /></button>{preview && <a href={preview} target="_blank" rel="noreferrer" className="icon-button hifi-hud-button" aria-label="Open preview in a new tab"><ExternalLink size={14} /></a>}</div>
+        <button className={`hifi-history-target ${historyOpen ? 'is-active' : ''}`} aria-label="Version history" aria-expanded={historyOpen} aria-controls="version-history" onClick={() => setHistoryOpen(!historyOpen)}><History size={24} /></button>
+      </header>
+
+      {/* Right-side pane, not a floating window: full-height bar that slides
+          in from the right. Click a version to check it out; click the
+          checked-out version again to revert to it and drop what's above. */}
+      <aside id="version-history" className="version-pane" inert={!historyOpen} data-gaze-overlay>
+        <div className="hifi-panel-heading"><span className="hifi-panel-title"><History size={18} />All Voice Prompts</span><button className="icon-button hifi-collapse" aria-label="Close history" onClick={() => setHistoryOpen(false)}><ChevronUp size={18} /></button></div>
+        <p className="hifi-panel-sub">Click a version to view it. Click again to revert here.</p>
+        <button id="new-version" className="save-version hifi-new-version" disabled={!connected}><Plus size={16} /> New version</button>
         <p className="history-caption">{demo ? 'Edits and saved versions from your playground.' : 'Version history becomes available when source editing is connected.'}</p>
-        <ol id="history" className="version-list" />
+        <ol id="history" className="version-list hifi-prompt-history" />
       </aside>
 
       <footer className="workspace-footer" data-gaze-overlay>
-        <details className="account-menu"><summary className="icon-button workspace-glass" aria-label="Account menu"><UserRound size={20} /></summary><div className="workspace-menu workspace-glass"><p>gaze workspace</p><a href="/gallery"><FolderOpen size={16} /> View projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Settings</button></div></details>
+        <details className="account-menu hifi-profile"><summary className="hifi-profile-pill" aria-label="Account menu"><span>Anna K.</span></summary><div className="workspace-menu hifi-menu hifi-profile-menu"><a href="/gallery"><FolderOpen size={16} /> View Projects</a><button onClick={() => settings.current?.showModal()}><Settings size={16} /> Settings</button><p>Anna K.</p></div></details>
         <div className="voice-dock workspace-glass">
           <div className="voice-status"><span className="voice-wave" aria-hidden><i /><i /><i /><i /><i /></span><span id="status" role="status">{demo || connected ? 'Click an element, then describe your change.' : 'Preview mode · open from the gallery to edit'}</span></div>
           <div id="point" className="point-status">{demo || connected ? 'Click the preview to select a target' : 'Your dev server stays in control'}</div>

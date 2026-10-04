@@ -11,7 +11,7 @@ import type {
 } from "@mhacks/contracts";
 import type { IpcResult } from "@mhacks/contracts";
 import { applyTier1Edit } from "./tier1";
-import type { FileGitService } from "./git";
+import type { GitService } from "./git";
 
 export interface BuildGate {
   check(filesChanged: string[]): Promise<{ ok: true } | { ok: false; message: string }>;
@@ -26,7 +26,7 @@ export const PASS_GATE: BuildGate = {
 export type EditRequestWithParent = EditRequest;
 
 export interface ExecutorDeps {
-  git: FileGitService;
+  git: GitService;
   readFile: (absPath: string) => Promise<string>;
   writeFile: (absPath: string, text: string) => Promise<void>;
   resolveRoot: (filePath: string | null) => string;
@@ -82,6 +82,24 @@ export async function submitEdit(
   }
   const abs = deps.resolveRoot(targetPath);
 
+  // Baseline first (best-effort, never blocks the edit): with real git the
+  // parent commit is the baseline, and the service auto-records the
+  // pristine tree on first use so Undo works even for the first edit.
+  try {
+    await deps.git.ensureBaseline();
+  } catch {
+    // Baseline failure never blocks the edit itself.
+  }
+
+  // Edits land on the session branch: if the pane is viewing an older
+  // (detached) version, return to latest first so the diff applies to
+  // current content, not stale pixels.
+  try {
+    await deps.git.reattach();
+  } catch (err) {
+    return envelopeFail(`cannot edit while detached: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   let original: string;
   try {
     original = await deps.readFile(abs);
@@ -100,13 +118,8 @@ export async function submitEdit(
     }
   }
 
-  // Baseline so Undo always has somewhere to go: capture pre-edit state
-  // before mutating. Post-edit pre-commit below is the second half.
-  try {
-    await deps.git.createSnapshot(`pre-edit ${req.id}`);
-  } catch {
-    // Snapshot failure never blocks the edit itself.
-  }
+  // Real git: the parent commit IS the baseline, so there is exactly one
+  // commit per applied edit. Undo steps the branch tip back one commit.
 
   let lastError: string | null = null;
   for (let attempt = 0; attempt <= POLICY.MAX_RETRIES; attempt++) {
@@ -182,7 +195,7 @@ export async function submitEdit(
 
     const gateRes = await gate.check([targetPath]);
     if (gateRes.ok) {
-      const snap = await deps.git.createSnapshot(`edit ${req.id}`);
+      const snap = await deps.git.createSnapshot(`edit ${req.id}`, [targetPath]);
       const hot = deps.didReload ? await deps.didReload() : false;
       const durationMs = (deps.now ?? Date.now)() - t0;
       const value: EditResult = {
