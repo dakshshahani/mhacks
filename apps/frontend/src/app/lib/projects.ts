@@ -38,6 +38,12 @@ function harnessError(action: string, body: unknown): Error {
   return new Error(`${action} failed: ${message}`);
 }
 
+/** Shared envelope unwrap for the harness IpcResult-shaped routes. */
+function unwrap<T>(action: string, res: Response, body: { ok: boolean; value?: T } & { message?: string }): T {
+  if (!res.ok || !body.ok || body.value === undefined) throw harnessError(action, body);
+  return body.value;
+}
+
 export function relativeEdited(mtimeMs: number): string {
   if (!mtimeMs) return "unknown";
   const mins = Math.max(0, Math.round((Date.now() - mtimeMs) / 60000));
@@ -89,8 +95,7 @@ export async function startGeneration(prompt: string): Promise<GenerationJob> {
     body: JSON.stringify({ prompt }),
   });
   const body = (await res.json()) as { ok: boolean; value?: GenerationJob } & { message?: string };
-  if (!res.ok || !body.ok || !body.value) throw harnessError("generate", body);
-  return body.value;
+  return unwrap("generate", res, body);
 }
 
 export async function generationStatus(jobId: string): Promise<GenerationStatus> {
@@ -98,13 +103,16 @@ export async function generationStatus(jobId: string): Promise<GenerationStatus>
     cache: "no-store",
   });
   const body = (await res.json()) as { ok: boolean; value?: GenerationStatus } & { message?: string };
-  if (!res.ok || !body.ok || !body.value) throw harnessError("generate status", body);
-  return body.value;
+  return unwrap("generate status", res, body);
 }
+
+/** Poll ceiling: 6min at 2s cadence — past that the job is presumed stalled
+ *  and the UI must surface retry instead of spinning forever. */
+const MAX_POLLS = 180;
 
 export async function generateProject(prompt: string): Promise<ActiveProject> {
   const { jobId } = await startGeneration(prompt);
-  for (;;) {
+  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
     await new Promise((r) => setTimeout(r, 2000));
     const status = await generationStatus(jobId);
     if (status.state === "ready" && status.value) return status.value;
@@ -112,6 +120,7 @@ export async function generateProject(prompt: string): Promise<ActiveProject> {
       throw new Error(status.message || "Generation failed.");
     }
   }
+  throw new Error("Generation timed out — retry to try again.");
 }
 
 /** Open = single-active supervisor spawns `pnpm dev` and waits for ready.

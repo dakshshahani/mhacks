@@ -2,20 +2,19 @@
 
 /* Voice-to-project island (Task 2): browser speech recognition streams the
  *  transcript into the Figma Textbox states (default → atOrUnderSix →
- *  overSix past ~6 words); 4.5s of silence locks + submits the brief to
- *  POST /api/projects/generate, then routes to /{project}. No mic (denied
- *  or unsupported) falls back to a typed pill with the same geometry.
- *  Generating/error chrome lives in the dead strip below the panel
- *  (y800–832) — the Figma geometry above is untouched. */
+ *  overSix past ~6 lines, tail-pinned); 4.5s of silence locks + submits the
+ *  brief to POST /api/projects/generate, then routes to /{project}. Mic/type
+ *  toggle or no-mic browsers fall back to a typed pill with the same
+ *  geometry. Generating/error chrome lives in the dead strip below the
+ *  panel (y800–832) — the Figma geometry above is untouched. */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { IdeaPrompt, type PromptState } from "./idea-prompt";
+import { IdeaPrompt, PILL_OUTER_CLASS, PILL_TAB_CLASS, promptStateFor } from "./idea-prompt";
 import { generateProject } from "../lib/projects";
 import { projectHref } from "../project-url";
 
 const SILENCE_MS = 4500;
-const OVER_SIX_WORDS = 6;
 
 type Status = "listening" | "generating" | "error";
 
@@ -63,20 +62,11 @@ function getAsrServerSnapshot(): boolean {
   return false;
 }
 
-function wordCount(text: string): number {
-  const n = text.trim().split(/\s+/).filter(Boolean).length;
-  return Number.isFinite(n) ? n : 0;
-}
-
-function stateFor(transcript: string): PromptState {
-  if (transcript.trim().length === 0) return "default";
-  return wordCount(transcript) > OVER_SIX_WORDS ? "overSix" : "atOrUnderSix";
-}
-
 export default function VoicePrompt() {
   const router = useRouter();
   const asrAvailable = useSyncExternalStore(subscribeAsr, getAsrSnapshot, getAsrServerSnapshot);
   const [denied, setDenied] = useState(false);
+  const [forceTyped, setForceTyped] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [status, setStatus] = useState<Status>("listening");
   const [failure, setFailure] = useState("");
@@ -85,7 +75,13 @@ export default function VoicePrompt() {
   const phase = useRef<Status>("listening");
   const textRef = useRef("");
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const typed = !asrAvailable || denied;
+  const useTypedFallback = forceTyped || !asrAvailable || denied;
+
+  /** Single phase transition (ref + state stay together). */
+  const setPhase = useCallback((next: Status) => {
+    phase.current = next;
+    setStatus(next);
+  }, []);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimer.current !== null) {
@@ -98,8 +94,7 @@ export default function VoicePrompt() {
     async (brief: string) => {
       const text = brief.trim();
       if (text.length < 3 || phase.current === "generating") return;
-      phase.current = "generating";
-      setStatus("generating");
+      setPhase("generating");
       setFailure("");
       clearSilenceTimer();
       try {
@@ -111,12 +106,11 @@ export default function VoicePrompt() {
         const active = await generateProject(text);
         router.push(projectHref(active.name, active.previewUrl));
       } catch (err) {
-        phase.current = "error";
-        setStatus("error");
+        setPhase("error");
         setFailure(err instanceof Error ? err.message : "Generation failed.");
       }
     },
-    [clearSilenceTimer, router],
+    [clearSilenceTimer, router, setPhase],
   );
 
   // Silence gate: every transcript update restarts the 4.5s clock.
@@ -159,8 +153,7 @@ export default function VoicePrompt() {
         return;
       }
       if (phase.current !== "listening") return;
-      phase.current = "error";
-      setStatus("error");
+      setPhase("error");
       setFailure("The microphone cut out — retry to keep speaking, or type instead.");
     };
     rec.onend = () => {
@@ -186,20 +179,19 @@ export default function VoicePrompt() {
         // Already stopped.
       }
     };
-  }, [asrAvailable]);
+  }, [asrAvailable, setPhase]);
 
   const startListening = useCallback(() => {
     const rec = recognition.current;
     if (!rec) return;
-    phase.current = "listening";
-    setStatus("listening");
+    setPhase("listening");
     setFailure("");
     try {
       rec.start();
     } catch {
       // Already running — interim results will flow.
     }
-  }, []);
+  }, [setPhase]);
 
   const retry = useCallback(() => {
     if (textRef.current.trim().length >= 3) {
@@ -207,12 +199,11 @@ export default function VoicePrompt() {
     } else {
       textRef.current = "";
       setTranscript("");
-      phase.current = "listening";
-      setStatus("listening");
+      setPhase("listening");
       setFailure("");
       startListening();
     }
-  }, [startListening, submit]);
+  }, [startListening, submit, setPhase]);
 
   const submitTyped = useCallback(() => {
     const text = draft.trim();
@@ -225,15 +216,15 @@ export default function VoicePrompt() {
   // `transcript` state mirrors textRef on every update, so render reads state
   // only (refs stay in callbacks/effects). During generating/error the last
   // transcript stays frozen on screen by construction — nothing clears it.
-  const frozen = transcript;
-  const state = stateFor(frozen);
+  const displayTranscript = transcript;
+  const state = promptStateFor(displayTranscript);
 
   return (
     <>
-      {typed ? (
+      {status === "listening" && useTypedFallback ? (
         <section aria-label="Voice prompt" className="absolute left-[490px] top-[729px] h-[65px] w-[300px]">
-          <div className="h-full w-full rounded-[32px] bg-gradient-to-b from-[#666666]/40 via-[#1d1d1d]/90 to-[#1d1d1d] p-3 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px]">
-            <div className="flex h-[41px] items-center rounded-[20px] bg-white/[0.31] px-[35px] mix-blend-screen backdrop-blur-[40px]">
+          <div className={PILL_OUTER_CLASS}>
+            <div className={PILL_TAB_CLASS}>
               <label htmlFor="typed-brief" className="sr-only">
                 Type your idea
               </label>
@@ -253,8 +244,8 @@ export default function VoicePrompt() {
         </section>
       ) : (
         <>
-          <IdeaPrompt state={state} transcript={frozen} />
-          {state === "default" && status === "listening" && (
+          <IdeaPrompt state={state} transcript={displayTranscript} />
+          {!useTypedFallback && state === "default" && status === "listening" && (
             <button
               type="button"
               onClick={startListening}
@@ -264,11 +255,47 @@ export default function VoicePrompt() {
           )}
         </>
       )}
+      {/* Mic/type toggle lives in the dead strip below the pill (y800) —
+          the Figma pill/panel geometry above is untouched. */}
+      {state === "default" && status === "listening" && (
+        <div className="absolute left-[490px] top-[800px] w-[300px] text-center">
+          {useTypedFallback ? (
+            asrAvailable && !denied ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setForceTyped(false);
+                  startListening();
+                }}
+                className="text-[12px] font-normal leading-4 text-[#c5cad3]/70 underline underline-offset-2 transition-opacity hover:opacity-75"
+              >
+                Use mic instead
+              </button>
+            ) : (
+              <p className="text-[12px] font-normal leading-4 text-[#c5cad3]/50">
+                Mic unavailable in this browser
+              </p>
+            )
+          ) : (
+            <button
+              type="button"
+              onClick={() => setForceTyped(true)}
+              className="text-[12px] font-normal leading-4 text-[#c5cad3]/70 underline underline-offset-2 transition-opacity hover:opacity-75"
+            >
+              Type instead
+            </button>
+          )}
+        </div>
+      )}
       {(status === "generating" || status === "error") && (
         <div aria-live="polite" className="absolute left-[340px] top-[800px] w-[600px] text-center">
           {status === "generating" ? (
-            <p className="animate-ring-pulse text-[13px] font-normal leading-5 text-[#c5cad3]">
-              Building your first version…
+            <p className="flex items-center justify-center gap-2 text-[13px] font-normal leading-5 text-[#c5cad3]">
+              <span
+                aria-hidden
+                className="animate-spin h-[14px] w-[14px] rounded-full border-2 border-white/15 border-t-[#6fd6d1]"
+              />
+              <span className="animate-ring-pulse">Building your first version…</span>
             </p>
           ) : (
             <p className="text-[13px] font-normal leading-5 text-[#ffb3bd]">

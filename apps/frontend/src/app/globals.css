@@ -58,7 +58,8 @@ body {
   .animate-orb-c,
   .animate-orb-spin,
   .animate-orb-breathe,
-  .animate-ring-pulse {
+  .animate-ring-pulse,
+  .animate-spin {
     animation: none;
   }
 }
