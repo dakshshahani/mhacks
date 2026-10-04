@@ -176,6 +176,10 @@ export function describeOp(req) {
       return `${t}: spacing → ${op.param}`;
     case "set-align":
       return `${t}: align → ${op.param}`;
+    case "set-weight":
+      return `${t}: weight → ${op.param}`;
+    case "set-size":
+      return `${t}: size → ${op.param}`;
     case "hide":
       return `${t}: hidden`;
     case "swap-text":
@@ -334,8 +338,9 @@ export async function sendEdit(transcript) {
   clearCheckedOut();
   const secs = Math.round(body.undoWindowMs / 1000);  const flag =
     body.editRequest.route !== "no-llm" && !body.verified ? " (unverified — check it)" : "";
+  const jevMs = typeof body.decisionMs === "number" ? ` · Jev ${Math.round(body.decisionMs)}ms` : "";
   setStatus(
-    `Done: ${describeOp(body.editRequest)} (${body.editResult.filesChanged.join(", ")} @ ${body.editResult.commitSha.slice(0, 8)}) — undo within ${secs}s to revert${flag}`,
+    `Done: ${describeOp(body.editRequest)} (${body.editResult.filesChanged.join(", ")} @ ${body.editResult.commitSha.slice(0, 8)}) — undo within ${secs}s to revert${flag}${jevMs}`,
   );
   showUndoCircle(body.undoWindowMs);
   reloadPreview();

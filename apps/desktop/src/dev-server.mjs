@@ -190,6 +190,44 @@ const projectContext =
   "never inline styles or new CSS (the preview cannot render style objects). " +
   `Template files: ${demoFiles}. Work only within these files.`;
 
+// HMR truth, armed correctly: the file-watch can only observe a reload that
+// happens AFTER arming. Arming before the executor's write means our own
+// write resolves the wait (~120ms debounce) instead of a blind 2s timeout on
+// every edit. Drained once via didReload; manager identity is re-checked so
+// a mid-edit project switch fails honest-false instead of misattributing.
+function reloadArmer(getManager) {
+  let mgr = null;
+  let since = null;
+  return {
+    arm() {
+      mgr = getManager();
+      since = mgr ? mgr.lastReload : null;
+    },
+    wait(timeoutMs = 2000) {
+      const m = getManager();
+      const s = since;
+      since = null;
+      if (!m || m !== mgr || s === null) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        if (m.lastReload !== s) {
+          resolve(true);
+          return;
+        }
+        const off = m.onReload(() => {
+          clearTimeout(timer);
+          off();
+          resolve(true);
+        });
+        const timer = setTimeout(() => {
+          off();
+          resolve(m.lastReload !== s);
+        }, timeoutMs);
+      });
+    },
+  };
+}
+
+const demoReload = reloadArmer(() => devServer);
 const router = new IpcRouter({
   git,
   preview,
@@ -197,6 +235,7 @@ const router = new IpcRouter({
   executorDeps: {
     readFile: (p) => readFile(p, "utf8"),
     writeFile: async (p, t) => {
+      demoReload.arm();
       const { writeFile: wf } = await import("node:fs/promises");
       await wf(p, t, "utf8");
     },
@@ -220,7 +259,7 @@ const router = new IpcRouter({
         attempt: ctx.attempt,
       }),
     buildGate: buildGateFor(demoRoot, true),
-    didReload: () => devServer.waitForReload(2000),
+    didReload: () => demoReload.wait(),
   },
 });
 
@@ -467,11 +506,12 @@ async function handleDecideAndEdit(body, res) {
     case "applied": {
       const d = outcome.decision;
       console.log(
-        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)}`,
+        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)} stages=${JSON.stringify({ ...outcome.stages, total: Date.now() - t0 })}`,
       );
       sendJson(res, 200, {
         ok: true,
         decision: outcome.decision,
+        decisionMs: outcome.decisionMs,
         editRequest: outcome.editRequest,
         editResult: outcome.editResult,
         undoWindowMs: outcome.undoWindowMs,
@@ -896,10 +936,14 @@ async function projectContextFor(name) {
 /** Executor deps bound to a project context (mirrors the demo router deps,
  *  but rooted at the project with its gate + model context). */
 function projectSubmitDeps(ctx) {
+  const reload = reloadArmer(() =>
+    activeProject && activeProject.name === ctx.name ? projectServer : null,
+  );
   return {
     git: ctx.git,
     readFile: (p) => readFile(p, "utf8"),
     writeFile: async (p, t) => {
+      reload.arm();
       const { writeFile: wf } = await import("node:fs/promises");
       await wf(p, t, "utf8");
     },
@@ -919,11 +963,9 @@ function projectSubmitDeps(ctx) {
       }),
     buildGate: ctx.buildGate,
     // HMR truth only when this project is the supervised one; otherwise
-    // honest false (the edit + gate + undo are still real).
-    didReload: () =>
-      activeProject && activeProject.name === ctx.name
-        ? projectServer.waitForReload(2000)
-        : Promise.resolve(false),
+    // honest false (the edit + gate + undo are still real). Armed pre-write
+    // so our own write resolves it instead of a blind 2s timeout per edit.
+    didReload: () => reload.wait(),
   };
 }
 
