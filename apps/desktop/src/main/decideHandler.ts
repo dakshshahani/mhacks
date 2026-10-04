@@ -40,6 +40,23 @@ export function createDecideHandler(svc: DemoServices) {
     const t0 = Date.now();
     try {
       const liveFrame = svc.sanitizeFrame(body.frame);
+      // Same foreign-frame guard as the harness demo branch (this handler is
+      // demo-scoped): zero mapped filePaths means the finder never ran.
+      if (
+        liveFrame &&
+        liveFrame.candidates.length > 0 &&
+        !liveFrame.candidates.some((c) => typeof c.filePath === "string" && c.filePath.length > 0)
+      ) {
+        console.log(`[pipeline] demo pipeline got a foreign frame (${liveFrame.candidates.length} candidates, none mapped)`);
+        return {
+          status: 422,
+          body: {
+            ok: false,
+            code: "unknown",
+            message: "this looks like a project page, not the demo — open the project from the gallery so its files can be mapped, then edit there",
+          },
+        };
+      }
       const outcome = await decideAndEdit(transcript, x, y, {
         decide: svc.decide,
         submitEdit: svc.submitEdit,

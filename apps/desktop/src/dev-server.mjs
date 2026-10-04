@@ -456,6 +456,24 @@ async function handleDecideAndEdit(body, res) {
     let services;
     if (project === "demo") {
       const liveFrame = sanitizeFrame(body.frame, { allowSource: true });
+      // Foreign frame on the demo pipeline (custom ?preview= address, or a
+      // project name that didn't survive transport): zero allowlisted
+      // filePaths means the hybrid finder never ran, and the executor would
+      // fail opaquely on "no filePath". Fail fast naming the actual cause.
+      if (
+        liveFrame &&
+        liveFrame.candidates.length > 0 &&
+        !liveFrame.candidates.some((c) => typeof c.filePath === "string" && c.filePath.length > 0)
+      ) {
+        console.log(`[pipeline] demo pipeline got a foreign frame (${liveFrame.candidates.length} candidates, none mapped) — route it via the gallery project instead`);
+        sendJson(res, 422, {
+          ok: false,
+          code: "unknown",
+          message:
+            "this looks like a project page, not the demo — open the project from the gallery so its files can be mapped, then edit there",
+        });
+        return;
+      }
       services = {
         decide: jevLayer,
         submitEdit: (req) => router.invoke("agent:submitEdit", req),
