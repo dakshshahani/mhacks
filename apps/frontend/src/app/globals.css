@@ -52,7 +52,50 @@ body {
 .animate-orb-breathe { animation: orb-breathe 9s ease-in-out infinite; }
 .animate-ring-pulse { animation: ring-pulse 5s ease-in-out infinite; }
 
+/* ---- Aurora choreography: slow drifting glows behind the chooser cards ----
+   Small translate/scale ranges on long loops — movement reads as a gentle
+   breathing wash, never a lively bounce. Transform-only for cheap frames. */
+@keyframes aurora-drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(4%, 3%) scale(1.07); }
+}
+@keyframes aurora-drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1.04); }
+  50% { transform: translate(-4%, -2%) scale(0.97); }
+}
+@keyframes aurora-drift-c {
+  0%, 100% { transform: translate(2%, 0) scale(0.98); }
+  50% { transform: translate(-3%, 3%) scale(1.05); }
+}
+
+.animate-aurora-a { animation: aurora-drift-a 26s ease-in-out infinite; }
+.animate-aurora-b { animation: aurora-drift-b 34s ease-in-out infinite; }
+.animate-aurora-c { animation: aurora-drift-c 42s ease-in-out infinite; }
+
+/* ---- Aurora spin + breathe: one slow rotate and one scale/opacity pulse
+   per lobe, each on its own nested element (see components/aurora.tsx) so
+   the three loops never compete for `transform`. Spin is perceptible
+   because every lobe is elliptical; breathe keeps the field luminous
+   without flashing. Transform/opacity-only for cheap frames. */
+@keyframes aurora-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes aurora-breathe {
+  0%, 100% { opacity: 0.72; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+.animate-aurora-spin { animation: aurora-spin 90s linear infinite; }
+.animate-aurora-spin-rev { animation: aurora-spin 110s linear infinite reverse; }
+.animate-aurora-breathe { animation: aurora-breathe 12s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
+  .animate-aurora-a,
+  .animate-aurora-b,
+  .animate-aurora-c,
+  .animate-aurora-spin,
+  .animate-aurora-spin-rev,
+  .animate-aurora-breathe,
   .animate-orb-a,
   .animate-orb-b,
   .animate-orb-c,

@@ -9,8 +9,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Command, GitBranch } from "lucide-react";
-import { saveCustomProject } from "../lib/projects";
-import { GLASS } from "../components/glass";
+import { saveCustomProject } from "../../lib/projects";
+import { GLASS } from "../../components/glass";
 
 declare global {
   interface Window {

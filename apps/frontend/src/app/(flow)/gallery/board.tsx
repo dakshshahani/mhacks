@@ -1,9 +1,11 @@
 'use client';
 
 /* Project gallery board (client island): HiFi card grid, search, pagination.
-   Frame geometry in 1280×832 coordinates — grid x56 y328 w1184, cards
-   273×191 (32px gaps, 24px row gap), footer y770 (count + pagination pill),
-   search bar x56 y246 240×38. First card is the create entry → /new.
+   Frame geometry in 1280×832 coordinates — grid x56 y328 w1188, fixed 4×2
+   cards 273×191 (32px col gaps, 24px row gap, no scroll ever), footer y770
+   (count + pagination pill), search bar x56 y246 240×38. First tile is
+   always the create entry → /new, so 7 projects per page. The harness
+   scan order is arbitrary, so tiles sort latest-edited first here.
    Runnable-only flat scan (top-level dirs with package.json + dev script).
    Live scan via /api/projects. */
 
@@ -20,10 +22,10 @@ import {
   subscribeGallery,
   tooltipFresh,
   type Project,
-} from "../lib/projects";
-import { projectHref } from "../project-url";
+} from "../../lib/projects";
+import { projectHref } from "../../project-url";
 
-const PAGE_SIZE = 8;
+const PROJECTS_PER_PAGE = 7;
 
 function CreateCard() {
   return (
@@ -198,16 +200,18 @@ export default function GalleryBoard() {
   };
 
   const filtered = useMemo(() => {
+    // Latest-added first: the harness scan returns readdir order, so sort
+    // by root mtime desc here and the newest folders land on page 1.
+    const list = [...(projects ?? [])].sort((a, b) => (b.editedAt ?? 0) - (a.editedAt ?? 0));
     const q = query.trim().toLowerCase();
-    const list = projects ?? [];
     if (!q) return list;
     return list.filter((p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
   }, [projects, query]);
 
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(filtered.length / PROJECTS_PER_PAGE));
   const safePage = Math.min(page, pages);
-  // First tile is always the create entry (HiFi); project tiles paginate.
-  const tiles = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  // Fixed 4×2 grid of 8 tiles: create entry + 7 projects, no scrolling.
+  const tiles = filtered.slice((safePage - 1) * PROJECTS_PER_PAGE, safePage * PROJECTS_PER_PAGE);
   const busy = openingId !== null;
   const renderTile = (p: Project) => (
     <TileCard
@@ -230,8 +234,8 @@ export default function GalleryBoard() {
       <div className="absolute left-[56px] top-[246px]">
         <SearchBar value={query} onChange={(v) => { setQuery(v); setPage(1); }} />
       </div>
-      <section aria-label="Project gallery" className="absolute left-[56px] top-[328px] h-[406px] w-[1184px]">
-        <div className="absolute inset-0 overflow-y-auto">
+      <section aria-label="Project gallery" className="absolute left-[56px] top-[328px] h-[406px] w-[1188px]">
+        <div className="absolute inset-0 overflow-hidden">
           {projects === null ? (
             <p className="flex h-full items-center justify-center gap-2 text-[15px] text-[#c5cad3]">
               <Loader2 size={16} className="animate-spin" aria-hidden /> Scanning ~/Documents/Projects…
@@ -265,17 +269,10 @@ export default function GalleryBoard() {
               )}
             </div>
           ) : (
-            <>
-              <div className="flex gap-[32px]">
-                <CreateCard />
-                {tiles.slice(0, 3).map(renderTile)}
-              </div>
-              {tiles.length > 3 && (
-                <div className="flex gap-[32px]" style={{ marginTop: 24 }}>
-                  {tiles.slice(3).map(renderTile)}
-                </div>
-              )}
-            </>
+            <div className="grid grid-cols-4 gap-x-[32px] gap-y-[24px]">
+              <CreateCard />
+              {tiles.map(renderTile)}
+            </div>
           )}
         </div>
       </section>
