@@ -25,8 +25,15 @@ files:
   - node_modules/@mediapipe/tasks-vision/vision_bundle.mjs
   - node_modules/@mediapipe/tasks-vision/wasm/**/*
 extraResources:
+  # Pristine template only: .git internals break codesign (ENOENT on
+  # objects), and .mhacks-snapshots is test history that must not seed
+  # user installs.
   - from: demo
     to: demo
+    filter:
+      - "**/*"
+      - "!**/.git/**"
+      - "!**/.mhacks-snapshots/**"
   - from: src/guest/preview-preload.js
     to: guest/preview-preload.js
   - from: src/probe.js
