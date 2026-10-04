@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus } from "lucide-react";
+import { ArrowLeft, Loader2, Plus } from "lucide-react";
 import {
   fetchProjects,
   getSelectionServerSnapshot,
@@ -18,6 +18,7 @@ import {
   openProject,
   saveSelectedId,
   subscribeGallery,
+  tooltipFresh,
   type Project,
 } from "../lib/projects";
 import { projectHref } from "../project-url";
@@ -35,25 +36,47 @@ function Tile({
   dimmed: boolean;
   onSelect: () => void;
 }) {
+  const tipId = `project-tip-${project.id}`;
   return (
     <button
       type="button"
       onClick={onSelect}
       disabled={opening || dimmed}
       aria-pressed={selected}
-      title={`${project.name} — ${project.path} · edited ${project.lastEdited}`}
-      className={`group flex h-[128px] w-[196px] shrink-0 flex-col rounded-[12px] p-[10px] text-left transition outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${
-        selected ? "ring-2 ring-white/70 bg-white/[0.07]" : "hover:bg-white/[0.05]"
+      aria-describedby={tipId}
+      className={`group relative flex h-[128px] w-[196px] shrink-0 flex-col rounded-[12px] p-[10px] text-left transition outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${
+        selected
+          ? "ring-2 ring-white/70 bg-white/[0.07]"
+          : "hover:bg-white/[0.09] focus-visible:bg-white/[0.09]"
       } ${dimmed && !opening ? "opacity-40" : ""} disabled:cursor-wait`}
     >
+      {/* HiFi profile tooltip: overlays the tile against its top edge, width
+          hugs the text (always fits — copy tops out at "…months/years ago").
+          Hover + keyboard-focus parity; the native title is dropped so the
+          two tooltips never compete. */}
+      <span
+        role="tooltip"
+        id={tipId}
+        className="pointer-events-none absolute left-[10px] top-[10px] hidden h-[32px] max-w-[176px] items-center whitespace-nowrap rounded-[6px] bg-[#131519] px-[12px] font-[family-name:var(--font-inter)] text-[12px] font-normal leading-4 text-[#f5f6f7] group-hover:flex group-focus-visible:flex"
+      >
+        {tooltipFresh(project)}
+      </span>
       <span
         aria-hidden
         className="flex h-[72px] w-[176px] items-center justify-center rounded-[8px] border border-white/10 bg-white/[0.06] shadow-[inset_0_1px_1px_rgba(255,255,255,0.12)]"
       >
         {opening && <Loader2 size={20} className="animate-spin text-white/70" aria-hidden />}
       </span>
-      <span className="mt-[8px] block w-[176px] truncate text-[16px] font-normal leading-6 text-[#f5f7f7]">
-        {opening ? `Starting ${project.name}…` : project.name}
+      <span className="mt-[8px] flex w-[176px] items-center gap-[6px]">
+        {/* HiFi tile hover: arrow reveals beside the name (muted → ink). */}
+        <ArrowLeft
+          size={14}
+          aria-hidden
+          className="shrink-0 text-[#c5cad3] opacity-0 transition group-hover:text-[#f5f7f7] group-hover:opacity-100 group-focus-visible:text-[#f5f7f7] group-focus-visible:opacity-100"
+        />
+        <span className="block truncate text-[16px] font-normal leading-6 text-[#f5f7f7]">
+          {opening ? `Starting ${project.name}…` : project.name}
+        </span>
       </span>
       <span className="block w-[176px] truncate text-[12px] font-normal leading-[14px] text-[#c5cad3]/70">
         {project.framework} · {project.lastEdited}

@@ -12,6 +12,9 @@ export interface Project {
   framework: string;
   /** Display string ("2h ago"); derived from the root mtime. */
   lastEdited: string;
+  /** Root mtime epoch ms — drives the hover tooltip's freshness copy.
+   *  Absent only for pre-timestamp custom entries (treated as now). */
+  editedAt?: number;
 }
 
 export interface ActiveProject {
@@ -56,6 +59,32 @@ export function relativeEdited(mtimeMs: number): string {
   return new Date(mtimeMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** Hover-tooltip freshness: full unit ladder (seconds → years), always a
+ *  short single line that fits the 176px tile. Mirrors the HiFi tooltip
+ *  ("Last updated: 15 seconds ago"). */
+export function tooltipFresh(project: Project): string {
+  const at = project.editedAt ?? Date.now();
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (secs < 5) return "Last updated: just now";
+  if (secs < 60) return `Last updated: ${secs} second${secs === 1 ? "" : "s"} ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `Last updated: ${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Last updated: ${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `Last updated: ${days} day${days === 1 ? "" : "s"} ago`;
+  if (days < 30) {
+    const weeks = Math.floor(days / 7);
+    return `Last updated: ${weeks} week${weeks === 1 ? "" : "s"} ago`;
+  }
+  if (days < 365) {
+    const months = Math.floor(days / 30);
+    return `Last updated: ${months} month${months === 1 ? "" : "s"} ago`;
+  }
+  const years = Math.floor(days / 365);
+  return `Last updated: ${years} year${years === 1 ? "" : "s"} ago`;
+}
+
 /** Live scan — throws on transport error or {ok:false} envelope. */
 export async function fetchProjects(): Promise<Project[]> {
   const res = await fetch("/api/projects", { cache: "no-store" });
@@ -68,6 +97,7 @@ export async function fetchProjects(): Promise<Project[]> {
     path: e.path,
     framework: e.framework,
     lastEdited: relativeEdited(e.mtimeMs),
+    editedAt: e.mtimeMs,
   }));
 }
 
@@ -171,6 +201,7 @@ export function saveCustomProject(p: { name: string; path: string }): Project {
     path: p.path,
     framework: "React",
     lastEdited: "just now",
+    editedAt: Date.now(),
   };
   if (canStore()) {
     try {
