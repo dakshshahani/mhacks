@@ -92,13 +92,22 @@ export function saveCustomProject(p: { name: string; path: string }): Project {
 
 type GalleryListener = () => void;
 
+// Cached project snapshot: useSyncExternalStore requires referential
+// stability (a fresh array per call = infinite loop). Invalidated on every
+// notification before listeners re-read.
+let cachedProjects: Project[] | null = null;
+
 export function subscribeGallery(listener: GalleryListener): () => void {
   if (typeof window === "undefined") return () => {};
-  window.addEventListener("gaze:gallery", listener);
-  window.addEventListener("storage", listener);
+  const wrapped = () => {
+    cachedProjects = null;
+    listener();
+  };
+  window.addEventListener("gaze:gallery", wrapped);
+  window.addEventListener("storage", wrapped);
   return () => {
-    window.removeEventListener("gaze:gallery", listener);
-    window.removeEventListener("storage", listener);
+    window.removeEventListener("gaze:gallery", wrapped);
+    window.removeEventListener("storage", wrapped);
   };
 }
 
@@ -116,7 +125,8 @@ export function getSelectionServerSnapshot(): string | null {
 }
 
 export function getProjectsSnapshot(): Project[] {
-  return [...loadCustomProjects(), ...MOCK_PROJECTS];
+  if (!cachedProjects) cachedProjects = [...loadCustomProjects(), ...MOCK_PROJECTS];
+  return cachedProjects;
 }
 
 export function getProjectsServerSnapshot(): Project[] {
