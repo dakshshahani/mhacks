@@ -26,7 +26,7 @@ export const SCAFFOLD_FILES = [
 export const SCAFFOLD_FILE_INSTRUCTIONS = `Emit exactly these files, each as a fenced block opened by a line "### FILE: <path>" (path must be one of: ${SCAFFOLD_FILES.join(", ")}). No other files, no prose outside the blocks.
 - package.json: {"name": "<slug>", "private": true, "type": "module", "scripts": {"dev": "node server.mjs"}} — no dependencies.
 - server.mjs: zero-dependency static server. Read PORT from process.env (default 3000). Serve the directory with correct content types, SPA fallback to index.html, print exactly "ready on http://localhost:<PORT>" on listen, no other stdout before that line.
-- index.html: single page, links styles.css + main.js, lang + meta viewport, title from the brief.
+- index.html: single page, links styles.css + main.js, lang + meta viewport, title from the brief. Close every tag: the file MUST end with </body></html> (cut-off output is rejected and the whole generation fails, so budget tokens to finish).
 - styles.css: all custom CSS. No frameworks.
 - main.js: progressive enhancement only ("use strict", guard everything). The page is complete without it.
 - Your design read + plan go ONLY as // comment lines at the very top of main.js — nowhere else.`;

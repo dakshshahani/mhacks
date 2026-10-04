@@ -139,13 +139,13 @@ export default function Home() {
           <nav className="flex items-center gap-12" aria-label="Primary">
             <div className="flex items-center gap-5">
               {NAV.map((item) => (
-                <a
+                <Link
                   key={item.label}
                   href={item.href}
                   className="flex h-[52px] w-[116px] items-center justify-center rounded-[12px] text-[20px] font-normal leading-7 text-[#f5f7f7] transition-opacity hover:opacity-75"
                 >
                   {item.label}
-                </a>
+                </Link>
               ))}
             </div>
             <Link

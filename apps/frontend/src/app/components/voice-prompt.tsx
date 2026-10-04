@@ -11,12 +11,14 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { IdeaPrompt, PILL_OUTER_CLASS, PILL_TAB_CLASS, promptStateFor } from "./idea-prompt";
-import LookToSpeak from "./look-to-speak";
 import { generateProject } from "../lib/projects";
 import { startAudioCapture, transcribeAudio, type AudioCapture } from "../lib/audio-record";
 import { projectHref } from "../project-url";
 
 const SILENCE_MS = 4500;
+
+/** Shared empty-hear fallback line (spoken and typed paths converge here). */
+const HEARD_NOTHING = "Heard nothing — type in the box, then send";
 
 type Status = "listening" | "generating" | "error";
 
@@ -73,12 +75,13 @@ export default function VoicePrompt() {
   const [status, setStatus] = useState<Status>("listening");
   const [failure, setFailure] = useState("");
   const [draft, setDraft] = useState("");
+  /** Mic is live (user intent received) but no transcript yet — the pill
+      shows a Listening cue instead of looking idle. */
+  const [started, setStarted] = useState(false);
   const recognition = useRef<Recognition | null>(null);
   const phase = useRef<Status>("listening");
   const textRef = useRef("");
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pillRef = useRef<HTMLButtonElement | null>(null);
-  const [dwellFill, setDwellFill] = useState(0);
   const useTypedFallback = forceTyped || !asrAvailable || denied;
 
   /** Single phase transition (ref + state stay together). */
@@ -99,6 +102,7 @@ export default function VoicePrompt() {
       const text = brief.trim();
       if (text.length < 3 || phase.current === "generating") return;
       setPhase("generating");
+      setStarted(false);
       setFailure("");
       clearSilenceTimer();
       try {
@@ -141,14 +145,14 @@ export default function VoicePrompt() {
       if (!blob) {
         const reason = capture?.error ? ` (recorder: ${capture.error})` : "";
         setPhase("error");
-        setFailure(`Heard nothing${reason} — type in the box, then send`);
+        setFailure(reason ? `${HEARD_NOTHING} (${reason})` : HEARD_NOTHING);
         return;
       }
       try {
         const fallback = await transcribeAudio(blob);
         if (!fallback.trim()) {
           setPhase("error");
-          setFailure("Heard nothing — type in the box, then send");
+          setFailure(HEARD_NOTHING);
           return;
         }
         textRef.current = fallback;
@@ -157,7 +161,7 @@ export default function VoicePrompt() {
       } catch (err) {
         setPhase("error");
         setFailure(
-          `scribe fallback failed (${err instanceof Error ? err.message : String(err)}) — type in the box, then send`,
+          `backup transcription failed (${err instanceof Error ? err.message : String(err)}) — type in the box, then send`,
         );
       }
     },
@@ -175,7 +179,7 @@ export default function VoicePrompt() {
   }, [transcript, clearSilenceTimer, submitWithAudio]);
 
   // Voice lifecycle. The recognizer is created on mount but only STARTED on
-  // user intent (pill click, gaze dwell, retry): autostarting on page load
+  // user intent (pill click, retry): autostarting on page load
   // races permission prompts and turns quiet-room no-speech errors into an
   // instant failure screen. Chrome ends recognition on long pauses — restart
   // while still listening with nothing to submit yet. All state writes here
@@ -198,13 +202,25 @@ export default function VoicePrompt() {
       rec.onerror = (event) => {
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
           setDenied(true);
+          setStarted(false);
           return;
         }
         // Quiet room — not a failure. The recognizer keeps listening and the
         // 4.5s silence gate submits whatever was said (if anything).
         if (event.error === "no-speech" || event.error === "aborted") return;
+        // Transient network blip mid-utterance — not a failure while speech
+        // is flowing (Chrome fires these spuriously on its server socket).
+        // Keep listening; the silence gate submits what was said.
+        if (event.error === "network" && textRef.current.trim().length > 0) return;
+        // Browser recognizer unreachable but the parallel backup capture is
+        // still recording — not a failure yet. Stay listening; the silence
+        // gate runs the backup transcription and only errors if it too hears
+        // nothing. (This is the common case: browser STT dead, backup STT
+        // working.) Without a live capture there is nothing left to try.
+        if (event.error === "network" && captureRef.current) return;
         if (phase.current !== "listening") return;
         setPhase("error");
+        setStarted(false);
         if (event.error === "audio-capture") {
           setFailure("No microphone found — check it's connected and not held by another app, or type instead.");
         } else if (event.error === "network") {
@@ -244,7 +260,7 @@ export default function VoicePrompt() {
     if (!asrAvailable) return;
     const rec = ensureRecognition();
     if (!rec) return;
-    // No autostart: the mic starts on pill click, gaze dwell, or retry.
+    // No autostart: the mic starts on pill click or retry.
     // (Autostarting on load races permission prompts and turns quiet-room
     // no-speech errors into an instant failure screen.)
     return () => {
@@ -270,6 +286,7 @@ export default function VoicePrompt() {
     setDenied(false);
     setPhase("listening");
     setFailure("");
+    setStarted(true);
     // Parallel Scribe capture (proven workspace pattern): best-effort audio
     // alongside speech, consumed only when speech yields no transcript.
     captureRef.current?.discard();
@@ -320,6 +337,7 @@ export default function VoicePrompt() {
   const typeInstead = useCallback(() => {
     setDraft(textRef.current.trim());
     setPhase("listening");
+    setStarted(false);
     setFailure("");
     setForceTyped(true);
   }, [setPhase]);
@@ -355,24 +373,19 @@ export default function VoicePrompt() {
         </section>
       ) : (
         <>
-          <IdeaPrompt state={state} transcript={displayTranscript} />
+          <IdeaPrompt
+            state={state}
+            transcript={displayTranscript}
+            listening={status === "listening" && started && !useTypedFallback}
+          />
           {!useTypedFallback && state === "default" && status === "listening" && (
-            <>
-              <button
-                ref={pillRef}
-                type="button"
-                onClick={startListening}
-                aria-label="Look here and speak, or click to start speaking"
-                title="Look here and speak — or click to start"
-                className="absolute left-[490px] top-[729px] h-[65px] w-[300px] cursor-pointer rounded-[32px] transition-[background-color] focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
-                style={
-                  dwellFill > 0
-                    ? { backgroundColor: `rgba(111, 214, 209, ${0.14 * dwellFill})` }
-                    : undefined
-                }
-              />
-              <LookToSpeak targetRef={pillRef} onDwell={startListening} onProgress={setDwellFill} />
-            </>
+            <button
+              type="button"
+              onClick={startListening}
+              aria-label="Click to start speaking"
+              title="Click to start speaking"
+              className="absolute left-[490px] top-[729px] h-[65px] w-[300px] cursor-pointer rounded-[32px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+            />
           )}
         </>
       )}

@@ -91,7 +91,7 @@ describe("ipc router", () => {
     const stillTwo = await router.invoke("git:history", undefined);
     assert.equal(stillTwo.ok, true);
     if (!stillTwo.ok) return;
-    assert.equal(stillTwo.value.length, 2); // detached log: initial + v1 (tip v2 untouched)
+    assert.equal(stillTwo.value.length, 3); // session branch: initial + v1 + v2 (tip untouched)
 
     const bad = await router.invoke("git:checkout", { sha: "deadbeefdeadbeef" });
     assert.equal(bad.ok, false);

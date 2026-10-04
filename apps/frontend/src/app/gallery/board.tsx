@@ -176,6 +176,7 @@ export default function GalleryBoard() {
   // (never synchronously in setup) with cancellation on unmount.
   useEffect(() => {
     const cancel = { cancelled: false };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial scan must run on mount
     void load(cancel);
     return () => {
       cancel.cancelled = true;

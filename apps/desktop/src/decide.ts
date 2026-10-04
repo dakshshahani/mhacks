@@ -154,6 +154,10 @@ export type DecideOutcome =
   | {
       kind: "applied";
       decision: Decision;
+      /** Wall ms inside services.decide.decide — the showcase number. */
+      decisionMs: number;
+      /** Per-stage wall ms (probe → jev → map/compose → submit). */
+      stages: { probe: number; jev: number; map: number; submit: number };
       editRequest: EditRequest;
       editResult: EditResult;
       undoWindowMs: number;
@@ -206,6 +210,7 @@ export async function decideAndEdit(
     speech.start();
   }
 
+  const tProbe = Date.now();
   let frame;
   try {
     frame = await services.queryFrame(x, y);
@@ -229,7 +234,9 @@ export async function decideAndEdit(
     null;
 
   const input = buildDecisionInput(text, x, y, frame, lockedTarget?.id ?? null);
+  const tJev = Date.now();
   const decision = await services.decide.decide(input);
+  const decisionMs = Date.now() - tJev;
 
   if (decision.actionable < POLICY.ACTIONABLE_MIN || decision.target === null) {
     pipeline.reset();
@@ -240,6 +247,7 @@ export async function decideAndEdit(
   // Foreign-project mapping, on the DECIDED target (Jev may pick a different
   // candidate than lock-on guessed) with its intent, BEFORE compose — so the
   // request carries a server-resolved file. Unresolvable = fail card.
+  const tMap = Date.now();
   let decidedTarget = frame.candidates.find((c) => c.id === decision.target) ?? null;
   if (!decidedTarget) {
     pipeline.fail("target left the frame before the edit composed");
@@ -274,12 +282,19 @@ export async function decideAndEdit(
   pipeline.startEditing(req.id, `Editing ${req.target.filePath ?? label}…`);
   speech.pushTranscript(text, true);
 
+  const tSubmit = Date.now();
   const submit = await services.submitEdit(req);
   if (!submit.ok) {
     pipeline.fail(submit.message);
     speech.resetToIdle();
     return { kind: "error", message: submit.message };
   }
+  const stages = {
+    probe: tJev - tProbe,
+    jev: decisionMs,
+    map: tSubmit - tMap,
+    submit: Date.now() - tSubmit,
+  };
 
   // Verify is skipped on no-llm (build + Undo covers it). On small/large a
   // single advisory Jev noul pass runs — advisory because a re-submit with an
@@ -298,6 +313,8 @@ export async function decideAndEdit(
   return {
     kind: "applied",
     decision,
+    decisionMs,
+    stages,
     editRequest: req,
     editResult: submit.value,
     undoWindowMs: undoWindowMs(decision.riskScore),

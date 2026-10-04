@@ -75,44 +75,15 @@ function createOverlay() {
     zIndex: "2147483646",
     pointerEvents: "none",
   });
-  const orb = document.createElement("div");
-  const raw = document.createElement("div");
+  // Pointer rendering lives in the frontend gaze blob (apps/frontend blob.tsx
+  // + lib/blob-input.ts): this overlay draws candidate outlines only, never a
+  // cursor. The old orb/raw-dot pointer markers were removed when the blob
+  // replaced them — one cursor on screen, owned in one place.
   const outlines = new Map();
-  const dotStyle = (color, size) => ({
-    position: "fixed",
-    width: `${size}px`,
-    height: `${size}px`,
-    marginLeft: `${-size / 2}px`,
-    marginTop: `${-size / 2}px`,
-    borderRadius: "50%",
-    background: color,
-    boxShadow: `0 0 0 1px ${color}, 0 0 10px ${color}`,
-    display: "none",
-  });
-  Object.assign(raw.style, dotStyle("#f8bd46", 8));
-  Object.assign(orb.style, {
-    position: "fixed",
-    transform: "translate(-50%, -50%)",
-    borderRadius: "50%",
-    background: "radial-gradient(circle, rgba(90,224,231,.55), rgba(90,224,231,0) 72%)",
-    border: "1px solid rgba(90,224,231,.5)",
-    pointerEvents: "none",
-    display: "none",
-  });
-  layer.append(orb, raw);
   document.body.append(layer);
 
   return {
-    update({ rawPoint, point, radiusPx, candidates, lockedId, primaryId }) {
-      Object.assign(raw.style, { left: `${rawPoint.x}px`, top: `${rawPoint.y}px`, display: "block" });
-      Object.assign(orb.style, {
-        left: `${point.x}px`,
-        top: `${point.y}px`,
-        width: `${radiusPx * 2}px`,
-        height: `${radiusPx * 2}px`,
-        opacity: "0.65",
-        display: "block",
-      });
+    update({ candidates, lockedId, primaryId }) {
       const visible = new Set(candidates.map((candidate) => candidate.id));
       for (const [id, node] of outlines) {
         if (!visible.has(id)) {
@@ -146,8 +117,6 @@ function createOverlay() {
       layer.remove();
     },
     clear() {
-      orb.style.display = "none";
-      raw.style.display = "none";
       for (const [, node] of outlines) node.remove();
       outlines.clear();
     },
@@ -349,7 +318,12 @@ export function createGazeController({
         const trackedConfidence = latestPose ? 1 : 0;
         const radiusPx = radiusForConfidence(trackedConfidence, config);
         latestCursor = { rawPoint: mapped.rawPoint, point, radiusPx };
-        if (!listening && !manualLock && performance.now() - lastSelectionAt >= selectionIntervalMs) {
+        // Follow gaze whenever nothing is frozen: a latched manual lock or a
+        // locked mid-utterance target freezes the highlight for editing, but
+        // mic-on with no lock yet (pre-target speech) keeps following — the
+        // mic-start transition locks the stabilized target when one exists.
+        const frozen = manualLock || (listening && lockedId !== null);
+        if (!frozen && performance.now() - lastSelectionAt >= selectionIntervalMs) {
           lastSelectionAt = performance.now();
           sendProbe(point, radiusPx);
         }
@@ -357,9 +331,6 @@ export function createGazeController({
           ? hostCandidates(latestFrame, previewMetrics(preview))
           : [];
         overlay.update({
-          rawPoint: mapped.rawPoint,
-          point,
-          radiusPx,
           candidates,
           lockedId,
           primaryId: latestFrame?.lockedTarget?.id ?? stableId,

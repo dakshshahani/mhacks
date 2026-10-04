@@ -1,6 +1,8 @@
 // Figma Textbox set 288:9158 (Flow 1: New state landing). Display-only panel:
 // the voice island drives `state` from live speech, Task 2 submit on silence.
 // Geometry is ground truth — do not restyle (see page.tsx header comment).
+// Type is Jost 16/24 via layout.tsx (Jost on <html>, inherited here) — no
+// local font override so the Figma spec stays in one place.
 
 export type PromptState = "default" | "atOrUnderSix" | "overSix";
 
@@ -31,18 +33,30 @@ export function tailText(transcript: string): string {
 export function IdeaPrompt({
   state = "default",
   transcript = "",
+  listening = false,
 }: {
   state?: PromptState;
   transcript?: string;
+  /** Mic is live but no transcript yet — same pill geometry, live cue. */
+  listening?: boolean;
 }) {
   if (state === "default") {
     return (
       <section aria-label="Voice prompt" className="absolute left-[490px] top-[729px] h-[65px] w-[300px]">
         <div className={PILL_OUTER_CLASS}>
-          <div className={`${PILL_TAB_CLASS} justify-center`}>
-            <p className="text-center text-[16px] font-normal leading-6 text-[#f5f7f7]">
-              Look here. Start speaking
-            </p>
+          <div className={`${PILL_TAB_CLASS} justify-center gap-2`}>
+            {listening ? (
+              <>
+                <span aria-hidden className="animate-pulse h-2 w-2 shrink-0 rounded-full bg-[#6fd6d1]" />
+                <p className="text-center text-[16px] font-normal leading-6 text-[#f5f7f7]">
+                  Listening…
+                </p>
+              </>
+            ) : (
+              <p className="text-center text-[16px] font-normal leading-6 text-[#f5f7f7]">
+                Look here. Start speaking
+              </p>
+            )}
           </div>
         </div>
       </section>

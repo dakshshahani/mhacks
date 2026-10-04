@@ -61,7 +61,10 @@ const FENCED_BLOCK = /```(?:\w+)?\s*\n([\s\S]*?)\n?```/;
 
 /** Parse "### FILE: <path>" fenced blocks into the fixed file set. Unknown
  *  paths, traversal, and absolute paths are dropped (fail-closed: the caller
- *  requires the full set, so junk degrades to null, never a stray write). */
+ *  requires the full set, so junk degrades to null, never a stray write).
+ *  index.html must close with </html>: a model cut off by max_tokens emits
+ *  all five blocks with the page severed mid-tag (broken DOM, probe can't
+ *  map it, no highlights) — that set is rejected, never written. */
 export function parseScaffoldFiles(text: string): ScaffoldFile[] | null {
   const out: ScaffoldFile[] = [];
   const re = /^### FILE:\s*(\S+)\s*$/gm;
@@ -86,6 +89,8 @@ export function parseScaffoldFiles(text: string): ScaffoldFile[] | null {
     out.push({ path: p, content });
   }
   if (out.length !== SCAFFOLD_FILES.length) return null;
+  const page = out.find((f) => f.path === "index.html");
+  if (!page || !/<\/html\s*>/i.test(page.content)) return null;
   return (SCAFFOLD_FILES as readonly string[]).map((p) => out.find((f) => f.path === p)!);
 }
 
@@ -109,10 +114,11 @@ export async function generateScaffold(
     max_tokens: options.maxTokens ?? MAX_TOKENS,
     temperature: 0.7,
     // GLM burns the whole budget on hidden reasoning by default (probed:
-    // 2000/2000 reasoning tokens, content cut off). Medium keeps the plan
-    // visible in-file (as main.js comments) while staying in the 1–2min demo
-    // budget; "low" verified accepted, medium is the same enum family.
-    reasoning_effort: "medium",
+    // 2000/2000 reasoning tokens, content cut off). Low keeps the plan
+    // visible in-file (as main.js comments) with the fastest round trip;
+    // medium timed out at 250s under provider load (2026-10-04). "Low"
+    // verified accepted, same enum family.
+    reasoning_effort: "low",
     messages: [
       { role: "system", content: buildScaffoldSystemPrompt() },
       { role: "user", content: buildScaffoldUserPrompt(cleanBrief, projectSlug) },

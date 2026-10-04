@@ -86,8 +86,8 @@ describe("GitService", () => {
     assert.match(await fs.readFile(path.join(root, "Hero.tsx"), "utf8"), /Two/);
     // Non-destructive: the branch tip hasn't moved.
     assert.equal(await git(root, "rev-parse", "main"), tipBefore);
-    // Detached log shows ancestors only.
-    assert.deepEqual(await labels(gitSvc), ["gaze: initial", "v1", "v2"]);
+    // History is the session branch, stable across detached view.
+    assert.deepEqual(await labels(gitSvc), ["gaze: initial", "v1", "v2", "v3"]);
 
     await gitSvc.revertTo(s1.sha);
     assert.match(await fs.readFile(path.join(root, "Hero.tsx"), "utf8"), /Hello/);

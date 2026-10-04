@@ -190,6 +190,44 @@ const projectContext =
   "never inline styles or new CSS (the preview cannot render style objects). " +
   `Template files: ${demoFiles}. Work only within these files.`;
 
+// HMR truth, armed correctly: the file-watch can only observe a reload that
+// happens AFTER arming. Arming before the executor's write means our own
+// write resolves the wait (~120ms debounce) instead of a blind 2s timeout on
+// every edit. Drained once via didReload; manager identity is re-checked so
+// a mid-edit project switch fails honest-false instead of misattributing.
+function reloadArmer(getManager) {
+  let mgr = null;
+  let since = null;
+  return {
+    arm() {
+      mgr = getManager();
+      since = mgr ? mgr.lastReload : null;
+    },
+    wait(timeoutMs = 2000) {
+      const m = getManager();
+      const s = since;
+      since = null;
+      if (!m || m !== mgr || s === null) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        if (m.lastReload !== s) {
+          resolve(true);
+          return;
+        }
+        const off = m.onReload(() => {
+          clearTimeout(timer);
+          off();
+          resolve(true);
+        });
+        const timer = setTimeout(() => {
+          off();
+          resolve(m.lastReload !== s);
+        }, timeoutMs);
+      });
+    },
+  };
+}
+
+const demoReload = reloadArmer(() => devServer);
 const router = new IpcRouter({
   git,
   preview,
@@ -197,6 +235,7 @@ const router = new IpcRouter({
   executorDeps: {
     readFile: (p) => readFile(p, "utf8"),
     writeFile: async (p, t) => {
+      demoReload.arm();
       const { writeFile: wf } = await import("node:fs/promises");
       await wf(p, t, "utf8");
     },
@@ -220,7 +259,7 @@ const router = new IpcRouter({
         attempt: ctx.attempt,
       }),
     buildGate: buildGateFor(demoRoot, true),
-    didReload: () => devServer.waitForReload(2000),
+    didReload: () => demoReload.wait(),
   },
 });
 
@@ -467,11 +506,12 @@ async function handleDecideAndEdit(body, res) {
     case "applied": {
       const d = outcome.decision;
       console.log(
-        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)}`,
+        `[pipeline] applied in ${Date.now() - t0}ms route=${d.route} intent=${d.intent} op=${d.op} param=${JSON.stringify(d.param)} verified=${outcome.verified} sha=${outcome.editResult.commitSha.slice(0, 8)} stages=${JSON.stringify({ ...outcome.stages, total: Date.now() - t0 })}`,
       );
       sendJson(res, 200, {
         ok: true,
         decision: outcome.decision,
+        decisionMs: outcome.decisionMs,
         editRequest: outcome.editRequest,
         editResult: outcome.editResult,
         undoWindowMs: outcome.undoWindowMs,
@@ -821,7 +861,7 @@ async function allocateProjectSlug(prompt, nameHint) {
   throw new Error("could not allocate a project name — try a different idea");
 }
 
-let generatingProject = null; // in-flight generate slug (transport-owned exclusion)
+let generatingSlug = null; // in-flight generate slug (transport-owned exclusion)
 
 /** Async job store: generations outlive the 30s Next rewrite proxy, so the
  *  route returns a jobId immediately and the frontend polls status. */
@@ -832,9 +872,10 @@ const generateJobs = new Map(); // jobId -> { state, name, value, message }
  *  validation, allocation, and the in-flight guard — this never re-checks. */
 async function runGeneration(slug, prompt) {
   console.log(`[projects] generate "${slug}" from brief (${prompt.trim().length} chars)`);
+  // 300s stays under the frontend's 6min poll ceiling (180 × 2s).
   const files = await generateScaffold(prompt, slug, {
     logger: console,
-    timeoutMs: 250000,
+    timeoutMs: 300000,
   });
   if (!files) {
     throw new Error(
@@ -895,10 +936,14 @@ async function projectContextFor(name) {
 /** Executor deps bound to a project context (mirrors the demo router deps,
  *  but rooted at the project with its gate + model context). */
 function projectSubmitDeps(ctx) {
+  const reload = reloadArmer(() =>
+    activeProject && activeProject.name === ctx.name ? projectServer : null,
+  );
   return {
     git: ctx.git,
     readFile: (p) => readFile(p, "utf8"),
     writeFile: async (p, t) => {
+      reload.arm();
       const { writeFile: wf } = await import("node:fs/promises");
       await wf(p, t, "utf8");
     },
@@ -918,11 +963,9 @@ function projectSubmitDeps(ctx) {
       }),
     buildGate: ctx.buildGate,
     // HMR truth only when this project is the supervised one; otherwise
-    // honest false (the edit + gate + undo are still real).
-    didReload: () =>
-      activeProject && activeProject.name === ctx.name
-        ? projectServer.waitForReload(2000)
-        : Promise.resolve(false),
+    // honest false (the edit + gate + undo are still real). Armed pre-write
+    // so our own write resolves it instead of a blind 2s timeout per edit.
+    didReload: () => reload.wait(),
   };
 }
 
@@ -1226,6 +1269,8 @@ async function invokeForProject(project, channel, payload) {
     channel !== "git:undo" &&
     channel !== "git:confirm" &&
     channel !== "git:history" &&
+    channel !== "git:checkout" &&
+    channel !== "git:revertTo" &&
     channel !== "agent:submitEdit" &&
     channel !== "preview:queryElementAt"
   ) {
@@ -1257,6 +1302,14 @@ async function invokeForProject(project, channel, payload) {
       case "git:history": {
         const list = await ctx.git.history();
         return { ok: true, value: list.map((s) => ({ sha: s.sha, label: s.label, at: s.at })) };
+      }
+      case "git:checkout": {
+        const found = await ctx.git.checkout(payload?.sha);
+        return { ok: true, value: { sha: found.sha } };
+      }
+      case "git:revertTo": {
+        const found = await ctx.git.revertTo(payload?.sha);
+        return { ok: true, value: { sha: found.sha } };
       }
       case "agent:submitEdit":
         return await executorSubmitEdit(payload, projectSubmitDeps(ctx));
@@ -1347,13 +1400,13 @@ const server = createServer(async (req, res) => {
       if (prompt.trim().length < 3) {
         throw new Error("describe your idea first — a few words is enough");
       }
-      if (generatingProject !== null) {
-        throw Object.assign(new Error(`already generating "${generatingProject}"`), { status: 409 });
+      if (generatingSlug !== null) {
+        throw Object.assign(new Error(`already generating "${generatingSlug}"`), { status: 409 });
       }
       const nameHint = typeof body.name === "string" ? body.name : undefined;
       const slug = await allocateProjectSlug(prompt, nameHint);
       const jobId = `gen-${Date.now().toString(36)}-${(generateSeq += 1)}`;
-      generatingProject = slug;
+      generatingSlug = slug;
       generateJobs.set(jobId, { state: "generating", name: slug, value: null, message: null });
       console.log(`[projects] generate job ${jobId} for "${slug}"`);
       void (async () => {
@@ -1370,7 +1423,7 @@ const server = createServer(async (req, res) => {
           console.log(`[projects] generate job ${jobId} failed: ${message}`);
           generateJobs.set(jobId, { state: "failed", name: slug, value: null, message });
         } finally {
-          if (generatingProject === slug) generatingProject = null;
+          if (generatingSlug === slug) generatingSlug = null;
         }
       })();
       sendJson(res, 200, { ok: true, value: { jobId, name: slug } });

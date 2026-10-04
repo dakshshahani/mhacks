@@ -13,19 +13,25 @@ export type EditOp =
   | { op: "set-radius"; param: RadiusToken }
   | { op: "set-spacing"; param: SpacingToken }
   | { op: "set-align"; param: AlignToken }
+  | { op: "set-weight"; param: WeightToken }
+  | { op: "set-size"; param: SizeToken }
   | { op: "hide"; param: null }
   | { op: "swap-text"; param: string } // replaced text from the transcript span
 export type ColorToken = string; // bounded by design tokens in design.md
 export type RadiusToken = "sm" | "md" | "lg" | "full";
 export type SpacingToken = "tight" | "normal" | "loose";
 export type AlignToken = "left" | "center" | "right" | "justify";
-export type ParamToken = ColorToken | RadiusToken | SpacingToken;
+export type WeightToken = "normal" | "medium" | "bold";
+export type SizeToken = "xs" | "sm" | "base" | "lg" | "xl";
+export type ParamToken = ColorToken | RadiusToken | SpacingToken | WeightToken | SizeToken;
 
 /** Design token catalogs — frozen from design.md at hour 3. */
 export const COLOR_TOKENS = ["brand", "muted", "accent"] as const;
 export const RADIUS_TOKENS = ["sm", "md", "lg", "full"] as const;
 export const SPACING_TOKENS = ["tight", "normal", "loose"] as const;
 export const ALIGN_TOKENS = ["left", "center", "right", "justify"] as const;
+export const WEIGHT_TOKENS = ["normal", "medium", "bold"] as const;
+export const SIZE_TOKENS = ["xs", "sm", "base", "lg", "xl"] as const;
 
 /** Code model freeze (grill-locked, replaces Haiku). Lite tier is inherently
  *  minimal-reasoning: the API accepts no thinking controls (probe 2026-10-03:
