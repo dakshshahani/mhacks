@@ -13,6 +13,10 @@ export interface DevServerOptions {
   args?: string[];
   env?: Record<string, string>;
   debounceMs?: number;
+  /** Pin the port instead of picking a free one. The caller is then
+   *  responsible for passing it to the child (e.g. `--port`) when the
+   *  child does not honor the PORT env convention. */
+  port?: number;
 }
 
 export function pickFreePort(): Promise<number> {
@@ -44,6 +48,12 @@ export class DevServerManager {
 
   get logLines(): string[] {
     return [...this.logs];
+  }
+
+  /** Drop buffered child output. Call before (re)start so URL/ready
+   *  detection never matches a previous project's lines. */
+  clearLogs(): void {
+    this.logs = [];
   }
 
   get lastReload(): number {
@@ -91,7 +101,7 @@ export class DevServerManager {
 
   async start(opts: DevServerOptions): Promise<number> {
     await this.stop();
-    this.port = await pickFreePort();
+    this.port = opts.port ?? (await pickFreePort());
     const debounceMs = opts.debounceMs ?? 120;
     await this.watch(opts.root, debounceMs).catch(() => undefined);
     const child = spawn(opts.command, opts.args ?? [], {

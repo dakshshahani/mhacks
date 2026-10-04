@@ -123,8 +123,7 @@ describe("executor", () => {
     assert.equal(shouldRetry(3), false);
   });
 
-  it("parent address is resolved at apply time (forward-compat §5.4b)", async () => {
-    const { root } = await makeRoot();
+  it("parent address is resolved at apply time (forward-compat §5.4b)", async () => {    const { root } = await makeRoot();
     const git = new FileGitService(root);
     let seenParent: string | null = null;
     const res = await submitEdit(
@@ -144,5 +143,68 @@ describe("executor", () => {
     );
     assert.equal(res.ok, true);
     assert.match(String(seenParent), /justify-center/);
+  });
+
+  it("filePath escape attempts -> build-failed envelope, nothing written outside root", async () => {
+    const { root } = await makeRoot();
+    const git = new FileGitService(root);
+    for (const evil of ["../evil.ts", "/abs/evil.ts", "a/../../evil.ts", "sub/../../../evil.ts"]) {
+      const res = await submitEdit(req({ target: candidate({ filePath: evil }) }), {
+        git,
+        ...memIO(root),
+      });
+      assert.equal(res.ok, false, evil);
+      if (res.ok) continue;
+      assert.equal(res.code, "build-failed", evil);
+      assert.match(res.message, /suspicious filePath/, evil);
+    }
+    assert.equal(await fs.stat(path.join(root, "evil.ts")).then(() => true).catch(() => false), false);
+    assert.equal(await fs.stat(path.join(os.tmpdir(), "evil.ts")).then(() => true).catch(() => false), false);
+  });
+
+  it("truncated model output -> error-fed retry, then retry-exhausted, file intact", async () => {    const { root } = await makeRoot();
+    const big = `<div>\n${"x".repeat(1000)}\n</div>`;
+    await fs.writeFile(path.join(root, "Hero.tsx"), big);
+    const git = new FileGitService(root);
+    let calls = 0;
+    let seenError = "";
+    const res = await submitEdit(req({ op: null, route: "small", intent: "style" }), {
+      git,
+      ...memIO(root),
+      generateDiff: (_r, ctx) => {
+        calls += 1;
+        seenError = ctx.lastError ?? "";
+        return Promise.resolve("<div>truncated…</div>");
+      },
+    });
+    assert.equal(res.ok, false);
+    if (res.ok) return;
+    assert.equal(res.code, "build-failed");
+    assert.match(res.message, /retry-exhausted/);
+    assert.equal(calls, POLICY.MAX_RETRIES + 1);
+    assert.match(seenError, /suspiciously short/); // retry carried the truncation context
+    assert.equal(await fs.readFile(path.join(root, "Hero.tsx"), "utf8"), big);
+  });
+
+  it("identical model output -> no commit, retry-exhausted, file intact", async () => {
+    const { root } = await makeRoot();
+    const before = await fs.readFile(path.join(root, "Hero.tsx"), "utf8");
+    const git = new FileGitService(root);
+    let calls = 0;
+    const res = await submitEdit(req({ op: null, route: "small", intent: "content" }), {
+      git,
+      ...memIO(root),
+      generateDiff: () => {
+        calls += 1;
+        return Promise.resolve(before); // model miss: byte-identical rewrite
+      },
+    });
+    assert.equal(res.ok, false);
+    if (res.ok) return;
+    assert.equal(res.code, "build-failed");
+    assert.match(res.message, /retry-exhausted/);
+    assert.equal(calls, POLICY.MAX_RETRIES + 1);
+    const labels = (await git.history()).map((s) => s.label);
+    assert.ok(labels.every((l) => !l.startsWith("edit "))); // pre-edit baseline only, no edit committed
   });
 });

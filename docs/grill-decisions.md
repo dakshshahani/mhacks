@@ -14,6 +14,19 @@ conflict.
 | Pricing/landing | **Everything mocked in 24h** — pricing cards + local token counter; no Stripe, no webhooks |
 | Product name | Placeholder until hour 18 |
 | Demo target | **A deliberately generic, highly-editable site** (easy for Jev to command + 3.5 Flash-Lite to edit); open-repo/URL stay visible in UI as non-demo paths |
+| Foreign editing | **Every gallery project editable like demo** (reverses the template-only scope above for *editing*, not just preview): harness reverse-proxies the project's dev server with probe injection; hybrid file finder (text-anchored → component-anchored → LLM tie-break); per-project git snapshots + relaxed gate; Tier-1 requires sourceLine (voids to small-route LLM otherwise) |
+
+## Follow-up round (foreign editing scope)
+
+| Question | Answer |
+| --- | --- |
+| Probe delivery | **Proxy + inject** — harness reverse-proxies the project's dev server (`/proxy/:name/`), injects `probe.js` into HTML, strips frame-busters, passes HMR websockets through. No touches to project code. Rejected: manual snippet (hand-edits their source), auto plugin inject (modifies their build) |
+| Probe failed open | Click coordinates unexplained at first ("point 140,89") — fixed by identifying the component at click time via the same probe |
+| File mapping | **Hybrid** — content intents anchor on quoted span text first (usage file beats definition file), otherwise component-definition convention search (deterministic), LLM (`chooseFile`, membership-validated) breaks ties only |
+| Tier-1 on foreign | **Voided without sourceLine** — unscoped class/text patches hit the first match in the file (wrong element); foreign always routes small/large. Demo unchanged (probe stamps lines) |
+| Edit power | **Full loop** — Flash-Lite rewrites + relaxed gate (non-empty, no diff-shape, balanced; no data-source requirement) + snapshots + undo per project |
+| Supervision | **Single-active + marker-tracked** — opening kills the previous server; `.mhacks-snapshots/supervisor.json` records our port so later opens reap only our orphans (never the user's own servers); readiness requires a real HTTP response, not log-sniffing; named conflicts surface their PID |
+| Ghost-state postmortem | "Active project vanishing" was misread: the endpoint reports null when the child is dead, and dead children came from orphan port-squatters + a log-URL liveness race — both fixed, no state bug existed |
 | Priority | Core loop working on the demo site + PM-designed clean UI; landing page kept short |
 | Eye tracking | **WebGazer.js — tested on a team laptop** (PRD's 100–200px is still vendor-adjacent; measure our own in the spike) |
 | Shell | **React project; Electron wrap only if it doesn't threaten the core loop** |

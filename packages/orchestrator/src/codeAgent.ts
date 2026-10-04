@@ -120,8 +120,7 @@ export function buildContentParts(req: EditRequest, files: EditFileContext = {})
   return parts;
 }
 
-/** Returns the complete replacement file text, or null when unusable (caller treats as build-fail). */
-export async function generateNarrowDiff(
+/** Returns the complete replacement file text, or null when unusable (caller treats as build-fail). */export async function generateNarrowDiff(
   req: EditRequest,
   options: FlashLiteOptions = {},
 ): Promise<string | null> {
@@ -168,6 +167,113 @@ export async function generateNarrowDiff(
   } catch (err) {
     options.logger?.warn(
       "[flash] failed:",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
+/** Hybrid file resolution, step 2 (step 1 is the shell convention search).
+ *  The model picks ONE file from the convention matches for a component the
+ *  user addressed. Output is validated against the candidate list, so a
+ *  hallucinating model degrades to null (fail card), never a wrong file. */
+
+export interface FileChoiceInput {
+  transcript: string;
+  componentName: string;
+  outerHTMLSnippet: string;
+  /** Root-relative candidate paths from the convention search. */
+  candidates: string[];
+  /** Surrounding markup of the click (parent level). When identical text or
+   *  components appear in several files, prefer the file whose surroundings
+   *  match this context. */
+  contextHTML?: string;
+}
+
+export interface ChooseFileOptions {
+  apiKey?: string;
+  modelId?: string;
+  logger?: { warn(...args: unknown[]): void };
+  transport?: (
+    url: string,
+    init: { method: string; headers: Record<string, string>; body: string },
+  ) => Promise<{ ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<unknown> }>;
+}
+
+function isSafeRelPath(p: string, candidates: readonly string[]): boolean {
+  return (
+    candidates.includes(p) &&
+    p.length > 0 &&
+    !p.startsWith("/") &&
+    !/(^|\/)\.\.(\/|$)/.test(p)
+  );
+}
+
+export async function chooseFile(
+  input: FileChoiceInput,
+  options: ChooseFileOptions = {},
+): Promise<string | null> {
+  const apiKey = options.apiKey || env("GEMINI_API_KEY");
+  if (apiKey.length === 0) {
+    options.logger?.warn("[flash-pick] no api key");
+    return null;
+  }
+  const candidates = input.candidates.filter(
+    (c) => typeof c === "string" && c.length > 0 && c.length <= 300,
+  );
+  if (candidates.length === 0) return null;
+  const prompt = [
+    "You map a clicked UI component to its source file. Output ONLY JSON: {\"file\": \"<exact path from the list>\"}. No prose, no fences.",
+    `User said: ${input.transcript.slice(0, 300)}`,
+    `Component: ${input.componentName.slice(0, 80)}`,
+    `Clicked HTML: ${input.outerHTMLSnippet.slice(0, 800)}`,
+  ];
+  if (typeof input.contextHTML === "string" && input.contextHTML.length > 0) {
+    prompt.push(
+      `Surrounding markup of the click (prefer the file whose nearby markup matches this): ${input.contextHTML.slice(0, 800)}`,
+    );
+  }
+  prompt.push(
+    "Candidate files (reply with exactly one of these):",
+    ...candidates.map((c) => `- ${c}`),
+  );
+  const promptText = prompt.join("\n");
+  const modelId = options.modelId ?? CODE_MODEL.id;
+  const url = `${ENDPOINT}/${modelId}:generateContent?key=${apiKey}`;
+  const init = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      generationConfig: { temperature: 0, maxOutputTokens: 256 },
+      contents: [{ role: "user", parts: [{ text: promptText }] }],
+    }),
+  };
+  try {
+    const res = options.transport
+      ? await options.transport(url, init)
+      : await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!res.ok) {
+      options.logger?.warn(`[flash-pick] http ${res.status}`);
+      return null;
+    }
+    const body = (await res.json()) as GenerateContentResponse;
+    const parts = body.candidates?.[0]?.content?.parts ?? [];
+    const text = stripFences(
+      parts
+        .map((p) => p.text ?? "")
+        .join("")
+        .trim(),
+    );
+    const match = /\{[^{}]*"file"\s*:\s*"([^"]+)"[^{}]*\}/.exec(text);
+    const file = match?.[1];
+    if (typeof file !== "string" || !isSafeRelPath(file, candidates)) {
+      options.logger?.warn("[flash-pick] unusable answer");
+      return null;
+    }
+    return file;
+  } catch (err) {
+    options.logger?.warn(
+      "[flash-pick] failed:",
       err instanceof Error ? err.message : err,
     );
     return null;

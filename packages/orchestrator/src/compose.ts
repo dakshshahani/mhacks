@@ -37,7 +37,12 @@ const TOKEN_SETS = {
 } as const;
 type TokenOp = keyof typeof TOKEN_SETS;
 
-function toEditOp(op: string | null, param: string | null): EditOp | null {
+function toEditOp(op: string | null, param: string | null, sourceLine: number | null | undefined): EditOp | null {
+  // Tier-1 patches scope to the target's own data-source line. Without it
+  // (foreign probes report none) the renderer would edit the FIRST match in
+  // the file — a wrong-element patch — so the op voids and the LLM generates
+  // from the target selector + HTML instead.
+  if (typeof sourceLine !== "number") return null;
   if (op === "hide") return { op: "hide", param: null };
   if (op === "swap-text") {
     return typeof param === "string" && param.length > 0
@@ -69,7 +74,7 @@ export function composeEditRequest(input: ComposeInput): EditRequest | null {
   // truth isn't in the catalog. Below AUTOMATION_MIN the op is void even when
   // syntactically valid — the LLM generates instead.
   const catalogOk = input.decision.inCatalog >= POLICY.AUTOMATION_MIN;
-  const op = catalogOk ? toEditOp(input.decision.op, input.decision.param) : null;
+  const op = catalogOk ? toEditOp(input.decision.op, input.decision.param, target.sourceLine) : null;
   // Escalation floor is small (LLM generates); a Jev large stays large.
   const route =
     input.decision.route === "no-llm" && op === null

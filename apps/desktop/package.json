@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
+    "test": "node --test src/gaze/*.test.js",
     "dev": "node --experimental-strip-types --env-file=../../.env --import ../../packages/shell/dev-register.mjs --import ../../packages/orchestrator/dev-register.mjs ./src/dev-server.mjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@mhacks/contracts": "workspace:*",
     "@mhacks/orchestrator": "workspace:*",
     "@mhacks/shell": "workspace:*"

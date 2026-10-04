@@ -69,6 +69,17 @@ export async function submitEdit(
   if (!targetPath) {
     return envelopeFail(`no filePath for target ${req.target.id}: routing to large/fail, not a wrong file`);
   }
+  // Containment: filePath originates in page content (data-source attrs are
+  // web content, hence untrusted) — it must name a file inside the project
+  // root, never an absolute path or a parent escape. resolveRoot joins, so
+  // `..` segments would break out silently without this gate.
+  if (
+    targetPath.includes("\0") ||
+    targetPath.startsWith("/") ||
+    /(^|\/)\.\.(\/|$)/.test(targetPath)
+  ) {
+    return envelopeFail(`refusing suspicious filePath for target ${req.target.id}: not inside the project root`);
+  }
   const abs = deps.resolveRoot(targetPath);
 
   let original: string;
@@ -117,9 +128,28 @@ export async function submitEdit(
         lastError,
       });
       if (diff !== null) {
-        // Narrow-diff path: generator returns full replacement text for the
-        // target file in this harness (unified-diff apply is Dev C+1 work).
-        nextText = diff;
+        // Narrow-diff path: generator returns full replacement file content
+        // in this harness (unified-diff apply is Dev C+1 work).
+        // Truncation guard: a model cut off by maxOutputTokens returns a
+        // VALID-LOOKING prefix (balanced so far, markers intact) that would
+        // silently drop half the file. Small edits preserve length; only a
+        // delete intent may legitimately shrink below half.
+        if (diff.length < original.length * 0.5 && req.intent !== "delete") {
+          lastError =
+            `generated file suspiciously short (${diff.length} vs ${original.length} chars` +
+            ` — possible output truncation); regenerate the COMPLETE file`;
+          nextText = null;
+        } else if (diff === original) {
+          // A generated diff that changes nothing is a model miss, not an
+          // apply (Tier-1 keeps its idempotent no-ops; the model path must
+          // move pixels). Error-fed retry gives it one guided second chance.
+          lastError =
+            "generated file is identical to the current file: the requested change is not in it; " +
+            "re-read the target element and apply the edit";
+          nextText = null;
+        } else {
+          nextText = diff;
+        }
       } else {
         // Generator unusable: fall back to Tier-1 hint when one exists.
         if (req.op !== null) {

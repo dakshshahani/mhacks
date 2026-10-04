@@ -9,6 +9,7 @@ import type { EditRequest, ElementCandidate } from "@mhacks/contracts";
 import {
   buildContentParts,
   buildEditPrompt,
+  chooseFile,
   stripFences,
 } from "../src/codeAgent";
 
@@ -79,5 +80,58 @@ describe("flash-lite fallback input", () => {
   it("stripFences unwraps fenced output, passes bare text through", () => {
     assert.equal(stripFences("```tsx\n<div>x</div>\n```"), "<div>x</div>");
     assert.equal(stripFences("<div>x</div>"), "<div>x</div>");
+  });
+
+  it("chooseFile accepts only listed members, rejects hallucinations", async () => {
+    const input = {
+      transcript: "make it blue",
+      componentName: "GoButton",
+      outerHTMLSnippet: "<button>Go</button>",
+      candidates: ["src/a.tsx", "src/b.tsx"],
+    };
+    const ok = await chooseFile(input, {
+      apiKey: "k",
+      transport: () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(""),
+          json: () =>
+            Promise.resolve({
+              candidates: [{ content: { parts: [{ text: '```json\n{"file": "src/b.tsx"}\n```' }] } }],
+            }),
+        }),
+    });
+    assert.equal(ok, "src/b.tsx");
+
+    const hallucinated = await chooseFile(input, {
+      apiKey: "k",
+      transport: () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(""),
+          json: () =>
+            Promise.resolve({
+              candidates: [{ content: { parts: [{ text: '{"file": "../../evil.ts"}' }] } }],
+            }),
+        }),
+    });
+    assert.equal(hallucinated, null);
+
+    const garbage = await chooseFile(input, {
+      apiKey: "k",
+      transport: () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(""),
+          json: () => Promise.resolve({ candidates: [{ content: { parts: [{ text: "blue!" }] } }] }),
+        }),
+    });
+    assert.equal(garbage, null);
+
+    assert.equal(await chooseFile({ ...input, candidates: [] }, { apiKey: "k" }), null);
+    assert.equal(await chooseFile(input, { apiKey: "" }), null);
   });
 });

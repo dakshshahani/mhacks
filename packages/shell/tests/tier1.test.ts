@@ -81,4 +81,11 @@ describe("tier1 renderer", () => {
     assert.equal(isTier1Executable("swap-text", ""), false);
     assert.equal(isTier1Executable("bogus", "x"), false);
   });
+
+  it("unknown op throws instead of returning undefined (exhaustiveness)", () => {
+    assert.throws(
+      () => applyTier1Edit(`<div>x</div>`, { op: "nope", param: "x" } as never),
+      /unhandled EditOp/,
+    );
+  });
 });

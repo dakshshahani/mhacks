@@ -49,6 +49,14 @@ const SPACING_VALUES: Set<string> = new Set([
 const ALIGN_VALUES = new Set<string>([...ALIGN_TOKENS]);
 const COLOR_VALUES = new Set<string>([...COLOR_TOKENS]);
 
+/** Exhaustiveness guard: adding an op to the EditOp union without a case
+ *  here is a COMPILE error (op isn't never), not a silent undefined return
+ *  (noImplicitReturns is off, so a missing case would otherwise fall through
+ *  and hand undefined to the file writer). */
+function assertNever(op: never): never {
+  throw new Error(`unhandled EditOp: ${JSON.stringify(op)}`);
+}
+
 /** True when op/param is executable without a model (closure check mirror). */
 export function isTier1Executable(op: string | null, param: string | null): boolean {
   if (op === "hide") return true;
@@ -123,6 +131,8 @@ export function applyTier1Edit(
     case "swap-text": {
       return replaceText(fileText, line, `>${escapeHtml(op.param)}<`);
     }
+    default:
+      return assertNever(op);
   }
 }
 

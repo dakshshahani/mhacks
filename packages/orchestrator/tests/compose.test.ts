@@ -20,6 +20,7 @@ function candidate(): ElementCandidate {
     confidence: 0.9,
     trackedConfidence: 0.9,
     supportedOps: [{ op: "set-color", param: "brand" }],
+    sourceLine: 1,
   };
 }
 
@@ -92,5 +93,21 @@ describe("composeEditRequest closure", () => {
       frame,
     });
     assert.equal(req, null);
+  });
+
+  it("sourceless target voids a valid op (unscoped Tier-1 would hit the wrong element)", () => {
+    const sourceless: GazeFrame = {
+      candidates: [{ ...candidate(), sourceLine: null }],
+      lockedTarget: null,
+      capturedAt: 1,
+    };
+    const req = composeEditRequest({
+      transcript: "make it brand",
+      decision: decision({ inCatalog: 1 }),
+      frame: sourceless,
+    });
+    if (req === null) throw new Error("expected EditRequest");
+    assert.equal(req.op, null);
+    assert.equal(req.route, "small");
   });
 });
