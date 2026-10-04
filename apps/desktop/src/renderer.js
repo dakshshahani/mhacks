@@ -1,7 +1,9 @@
-// Browser-harness client (plain JS — no TS, no imports).
+// Browser-harness client (plain JS).
 // Thin client over the ipc.ts contract + the pipeline SSE stream. No decision
 // logic here: intent/target/route arrive from Dev B via the server, which runs
 // decideAndEdit (Jev -> composeEditRequest -> agent:submitEdit) in Node.
+
+import { createGazeController } from "./gaze/controller.js";
 
 const statusEl = document.querySelector("#status");
 const micEl = document.querySelector("#mic");
@@ -24,6 +26,8 @@ function previewFrame() {
 function reloadPreview() {
   const f = previewFrame();
   if (!f || !f.src) return;
+  lastFrame = null;
+  lastPoint = null;
   try {
     f.src = `${f.src.split("?")[0]}?t=${Date.now()}`;
   } catch {
@@ -42,6 +46,7 @@ let lastApplied = null;
 let editStartAt = 0;
 let editTimer;
 let pipeBusy = false;
+let gazeController = null;
 
 /** Send is enabled only when the pipeline is idle AND the box has text —
  *  an empty send can only ever 422 ("empty transcript"), so prevent it at
@@ -111,15 +116,16 @@ export function currentProject() {
   }
 }
 
-// Latest live-probe frame (foreign projects only; demo probes server-side).
-// Sent with the edit request so the server decides on clicked-what, not a
-// stale cache.
+// Latest live-probe frame. Sent with the edit request so the server decides
+// on clicked-what, not a stale cache.
 let lastFrame = null;
 
 export async function decideAndEdit(transcript, x, y) {
   let res;
   const body = { transcript, x, y, project: currentProject() };
-  if (lastFrame && currentProject() !== "demo") body.frame = lastFrame;
+  if (lastFrame && Array.isArray(lastFrame.candidates) && lastFrame.candidates.length > 0) {
+    body.frame = lastFrame;
+  }
   try {
     res = await fetch("/api/decide-and-edit", {
       method: "POST",
@@ -299,6 +305,7 @@ events.onmessage = (e) => {
   if (msg.type === "pipeline") renderPipeline(msg.state);
   else if (msg.type === "speech-state") {
     serverMicState = msg.state;
+    gazeController?.setSpeechState(msg.state);
     setMic(msg.state);
     renderMicButton();
   } else if (msg.type === "speech-transcript" && transcriptEl && !msg.event.isFinal) {
@@ -693,6 +700,7 @@ window.addEventListener("message", (e) => {
       return;
     }
     lastFrame = f;
+    gazeController?.acceptExternalFrame(f, { x: e.data.x, y: e.data.y });
     const locked =
       f.lockedTarget ??
       [...f.candidates]
@@ -780,3 +788,18 @@ window.mhacks = {
   updateSendButton,
   currentProject,
 };
+
+gazeController = createGazeController({
+  onFrame: ({ frame, previewPoint }) => {
+    lastFrame = frame;
+    if (previewPoint) lastPoint = previewPoint;
+    const target = frame.lockedTarget ?? frame.candidates?.at(-1) ?? frame.candidates?.[0] ?? null;
+    if (target && pointEl) {
+      pointEl.textContent = `${target.componentName ?? target.id}${frame.lockedTarget ? " — locked" : ""}`;
+    }
+  },
+  onStatus: (message) => {
+    if (!pipeBusy) setStatus(message);
+  },
+});
+gazeController.start();

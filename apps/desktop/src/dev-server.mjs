@@ -181,6 +181,7 @@ function buildGateFor(root, requireDataSource) {
 const demoFiles = await readdir(demoRoot)
   .then((fs) => fs.filter((f) => !f.startsWith(".")).join(", "))
   .catch(() => "Hero.tsx");
+const demoFileSet = new Set(demoFiles.split(", ").filter(Boolean));
 const projectContext =
   "React JSX template with Tailwind-style utilities; preview CSS defines only " +
   "bg-brand/bg-muted/bg-accent, rounded-sm/md/lg/full, p-2/4/8, gap-2/4/8, " +
@@ -241,8 +242,10 @@ pipeline.subscribe((state) => broadcast({ type: "pipeline", state }));
 const MIME = {
   ".html": "text/html",
   ".js": "text/javascript",
+  ".mjs": "text/javascript",
   ".tsx": "text/plain",
   ".json": "application/json",
+  ".wasm": "application/wasm",
 };
 
 // Token styles so Tier-1 ops are VISUALLY distinguishable in the preview.
@@ -271,11 +274,7 @@ async function renderPreview() {
 <head><meta charset="utf-8" /><title>demo preview</title><style>${TOKEN_CSS}</style></head>
 <body style="font-family: system-ui; padding: 24px;">
   ${hero}
-  <script>
-    document.addEventListener("click", (e) => {
-      parent.postMessage({ type: "preview-click", x: e.clientX, y: e.clientY }, "*");
-    });
-  </script>
+  <script src="/src/probe.js"></script>
 </body>
 </html>`;
 }
@@ -405,13 +404,14 @@ async function handleDecideAndEdit(body, res) {
   const t0 = Date.now();
   let outcome;
   try {
-    // Edit context: demo stays on the canned probe + template gate; a named
-    // project resolves its own context (own git, gate, resolveRoot) and
-    // carries its frame in the request body (live probe posts it at click).
+    // Edit context: both demo and named projects may carry the latest live
+    // frame from the preview probe. Demo frames retain validated data-source
+    // mappings; foreign frames are resolved through the hybrid finder.
     const project =
       typeof body.project === "string" && body.project.length > 0 ? body.project : "demo";
     let services;
     if (project === "demo") {
+      const liveFrame = sanitizeFrame(body.frame, { allowSource: true });
       services = {
         decide: jevLayer,
         submitEdit: (req) => router.invoke("agent:submitEdit", req),
@@ -419,6 +419,7 @@ async function handleDecideAndEdit(body, res) {
         pipeline,
         speech,
         queryFrame: async (qx, qy) => {
+          if (liveFrame && liveFrame.candidates.length > 0) return liveFrame;
           const frame = await router.invoke("preview:queryElementAt", { x: qx, y: qy });
           if (!frame.ok) {
             const err = new Error(`preview: ${frame.message}`);
@@ -849,9 +850,9 @@ function clamp01json(n, fallback) {
 }
 
 /** Validate a client-posted frame (probe.js output is page-adjacent input,
- *  not trusted data). filePath is ALWAYS re-nulled: only the hybrid finder
- *  below may set it, from server-side search. */
-function sanitizeFrame(raw) {
+ *  not trusted data). Foreign filePath values are always re-nulled; the
+ *  demo may retain a validated data-source path from its own template files. */
+function sanitizeFrame(raw, { allowSource = false } = {}) {
   if (!raw || !Array.isArray(raw.candidates)) return null;
   const cleanStr = (s, n) => (typeof s === "string" ? s.slice(0, n) : null);
   const cleanRect = (r) => ({
@@ -860,13 +861,22 @@ function sanitizeFrame(raw) {
     width: Math.max(0, Math.round(Number(r?.width) || 0)),
     height: Math.max(0, Math.round(Number(r?.height) || 0)),
   });
+  const cleanSource = (c) => {
+    if (!allowSource || typeof c?.filePath !== "string") return { filePath: null, sourceLine: null };
+    const filePath = c.filePath.replaceAll("\\", "/");
+    if (filePath.includes("..") || filePath.startsWith("/") || !demoFileSet.has(filePath)) {
+      return { filePath: null, sourceLine: null };
+    }
+    const sourceLine = Number.isInteger(c.sourceLine) && c.sourceLine > 0 ? c.sourceLine : null;
+    return { filePath, sourceLine };
+  };
   const cleanOne = (c, i) => ({
     id: typeof c.id === "string" && c.id.length > 0 ? c.id.slice(0, 40) : `c${i}`,
     selector: cleanStr(c.selector, 200) ?? "",
     // Names flow into the Jev state text: strict charset so page content
     // can't smuggle prompt-influencing tokens into an action-mapped field.
     componentName: cleanComponentName(c.componentName),
-    filePath: null,
+    ...cleanSource(c),
     boundingRect: cleanRect(c.boundingRect),
     outerHTMLSnippet: cleanStr(c.outerHTMLSnippet, 2048) ?? "",
     htmlTruncated: c.htmlTruncated === true,
