@@ -4,6 +4,7 @@
    All geometry absolutely positioned in frame coordinates; ScaleStage
    width-fits the 1280×832 frame so proportions hold at any viewport. */
 import { Mic } from "lucide-react";
+import Link from "next/link";
 import ScaleStage from "./stage";
 
 function LogoMark() {
@@ -115,7 +116,7 @@ function OrbitRing() {
 }
 
 const NAV = [
-  { label: "Projects", href: "/projects" },
+  { label: "Projects", href: "/gallery" },
   { label: "Pricing", href: "/pricing" },
   { label: "About", href: "/about" },
 ];
@@ -134,9 +135,9 @@ export default function Home() {
 
         {/* header: x40 y40, 1200×64 */}
         <header className="absolute left-[40px] top-[40px] flex h-16 w-[1200px] items-center justify-between">
-          <a href="/" aria-label="gaze home" className="flex h-[60px] w-[60px] items-center justify-center">
+          <Link href="/" aria-label="gaze home" className="flex h-[60px] w-[60px] items-center justify-center">
             <LogoMark />
-          </a>
+          </Link>
           <nav className="flex items-center gap-12" aria-label="Primary">
             <div className="flex items-center gap-5">
               {NAV.map((item) => (
