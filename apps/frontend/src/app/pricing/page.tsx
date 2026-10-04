@@ -1,14 +1,16 @@
 /* Ground truth: Figma Pricing Page "MacBook Air - 1" (1280×832).
    Page header x98 y132 (24px title + 14px sub). Table x84 y237 1129×514:
-   prices 20px above tier names (Free $0 / Pro $20 / BYOK $8), names 24px,
-   taglines 14px, 7 feature rows (14px labels + dividers, 18px values),
-   footer 12px. Tier columns arched (stadium tops per the Union shapes).
-   Plan actions (current-plan pill, Upgrade, Add-key, popup) are a client
-   island; the table shell stays a server component. */
+   solid #131519 r32 base (labels→Pro) + shared glass overlay + tier
+   overlays with elliptical caps (191×105, translucent, no drop shadows).
+   Columns EVEN at 495/730/965 per review (Figma's 47/41 gutters
+   deliberately evened); all text centered in-column. Prices 20px above
+   tier names (Free $0 / Pro $20 / BYOK $8), 7 feature rows, footer 12px.
+   Plan actions are a client island; the table shell stays server. */
 import { Check, X } from "lucide-react";
 import ScaleStage from "../stage";
 import SiteHeader from "../components/site-header";
 import PlanActions from "./actions";
+import { COLUMNS, COLUMN_WIDTH, colLocal } from "./columns";
 
 const TIERS = [
   { name: "Free", price: "$0/mo", tagline: "Try building by looking and talking." },
@@ -67,21 +69,36 @@ export default function PricingPage() {
 
         {/* table: x84 y237 1129×514 */}
         <section aria-label="Plans" className="absolute left-[84px] top-[237px] h-[514px] w-[1129px]">
-          {/* tier column backplates with stadium tops (Union rect+ellipse) */}
+          {/* solid base: labels→Pro, #131519 r32 */}
+          <div aria-hidden className="absolute left-0 top-0 h-[514px] w-[881px] rounded-[32px] bg-[#131519]" />
+          {/* shared glass overlay across all three tier columns */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute left-[378px] top-0 h-[514px] w-[714px] rounded-[32px] bg-[#1d1d1d]/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_0_22px_rgba(255,255,255,0.08)] backdrop-blur-[40px]"
+          />
+          {/* tier overlays: elliptical caps (191×105), translucent, integrated */}
           <div aria-hidden className="pointer-events-none absolute inset-0">
-            {[495, 733, 965].map((x) => (
+            {COLUMNS.map((x) => (
               <div
                 key={x}
-                className="absolute top-[-57px] h-[571px] w-[191px] rounded-t-[95px] rounded-b-[24px] bg-gradient-to-b from-white/[0.09] via-[#1d1d1d]/60 to-[#1d1d1d]/90 shadow-[inset_0_1px_1px_rgba(255,255,255,0.35)]"
-                style={{ left: x - 84 }}
+                className="absolute top-[-57px] h-[565px] bg-white/[0.03] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
+                style={{
+                  left: colLocal(x),
+                  width: COLUMN_WIDTH,
+                  borderRadius: "95px 95px 24px 24px / 105px 105px 24px 24px",
+                }}
               />
             ))}
           </div>
 
-          {/* tier headers: price / name / tagline */}
-          <div className="absolute left-[411px] top-[-38px] flex w-[661px] justify-between">
-            {TIERS.map((tier) => (
-              <div key={tier.name} className="flex w-[191px] flex-col items-center text-center">
+          {/* tier headers: price / name / tagline, centered per column */}
+          <div className="absolute left-[411px] top-[-38px] flex w-[661px]">
+            {TIERS.map((tier, i) => (
+              <div
+                key={tier.name}
+                className="flex w-[191px] shrink-0 flex-col items-center text-center"
+                style={{ marginLeft: i === 0 ? 0 : 44 }}
+              >
                 <p className="text-[20px] font-normal leading-[29px] text-[#f5f7f7]">{tier.price}</p>
                 <h2 className="mt-[20px] text-[24px] font-normal leading-[35px] text-[#f5f7f7]">{tier.name}</h2>
                 <p className="mt-[8px] max-w-[149px] text-[14px] font-normal leading-5 text-[#c5cad3]">
@@ -91,8 +108,8 @@ export default function PricingPage() {
             ))}
           </div>
 
-          {/* feature rows */}
-          <div className="absolute left-[33px] top-[95px] w-[1029px]">
+          {/* feature rows: labels col + value cells at the shared columns */}
+          <div className="absolute left-[33px] top-[95px] w-[1039px]">
             {ROWS.map((row) => (
               <div
                 key={row.label}
@@ -102,7 +119,11 @@ export default function PricingPage() {
                   {row.label}
                 </p>
                 {row.values.map((cell, i) => (
-                  <div key={i} className="flex w-[191px] shrink-0 items-center justify-center">
+                  <div
+                    key={i}
+                    className="flex w-[191px] shrink-0 items-center justify-center"
+                    style={{ marginLeft: i === 0 ? 53 : 44 }}
+                  >
                     <ValueCell cell={cell} />
                   </div>
                 ))}

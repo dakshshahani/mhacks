@@ -14,7 +14,7 @@ const CURRENT_PLAN = "Free" as const;
 const PILL =
   "flex h-[37px] w-[154px] items-center justify-center text-[16px] font-normal leading-[22px] outline-none transition focus-visible:ring-2 focus-visible:ring-white/70";
 
-function DemoPopup({ onClose }: { onClose: () => void }) {
+function DemoPopup({ message, onClose }: { message: string; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -54,7 +54,7 @@ function DemoPopup({ onClose }: { onClose: () => void }) {
           <X size={18} aria-hidden />
         </button>
         <p className="pr-[24px] text-[16px] font-normal leading-6 text-[#f5f7f7]">
-          We&rsquo;d like your money, but unfortunately, this is just a demo.
+          {message}
         </p>
         <div className="mt-[24px] flex justify-end">
           <button
@@ -72,54 +72,59 @@ function DemoPopup({ onClose }: { onClose: () => void }) {
 }
 
 export default function PlanActions() {
-  const [popupOpen, setPopupOpen] = useState(false);
+  const [popupMessage, setPopupMessage] = useState<string | null>(null);
   const invokerRef = useRef<HTMLElement | null>(null);
 
-  const open = useCallback((e: React.MouseEvent<HTMLElement>) => {
-    invokerRef.current = e.currentTarget;
-    setPopupOpen(true);
-  }, []);
+  const openWith = useCallback(
+    (message: string) => (e: React.MouseEvent<HTMLElement>) => {
+      invokerRef.current = e.currentTarget;
+      setPopupMessage(message);
+    },
+    [],
+  );
 
   const close = useCallback(() => {
-    setPopupOpen(false);
+    setPopupMessage(null);
     invokerRef.current?.focus();
   }, []);
 
   return (
     <>
-      <div className="absolute left-[495px] top-[698px] flex w-[661px] justify-between">
-        <div className="flex w-[191px] justify-center">
+      <div className="absolute left-[495px] top-[698px] flex w-[661px]">
+        <div className="flex w-[191px] shrink-0 justify-center">
           <button
             type="button"
-            disabled
-            aria-disabled="true"
+            onClick={openWith("Enjoy building with Gaze for free.")}
+            aria-haspopup="dialog"
             aria-label={`Your current plan: ${CURRENT_PLAN}`}
             title="Your current plan"
-            className={`${PILL} cursor-not-allowed rounded-[18px] bg-white/[0.14] text-[#f5f7f7] ring-1 ring-white/40`}
+            className={`${PILL} rounded-[18px] bg-[#5D58E9] text-white transition hover:bg-[#6d63f0]`}
           >
             Your current plan
           </button>
         </div>
-        <div className="flex w-[191px] justify-center">
+        <div className="flex w-[191px] shrink-0 justify-center" style={{ marginLeft: 44 }}>
           <button
             type="button"
-            onClick={open}
+            onClick={openWith("We'd like your money, but unfortunately, this is just a demo.")}
+            aria-haspopup="dialog"
             className={`${PILL} rounded-[18px] bg-white/[0.08] text-[#f5f7f7] transition hover:bg-white/[0.16]`}
           >
             Upgrade now
           </button>
         </div>
-        <div className="flex w-[191px] justify-center">
+        <div className="flex w-[191px] shrink-0 justify-center" style={{ marginLeft: 44 }}>
           <button
             type="button"
-            onClick={open}
+            onClick={openWith("We'd like your money, but unfortunately, this is just a demo.")}
+            aria-haspopup="dialog"
             className={`${PILL} rounded-[18px] bg-white/[0.08] text-[#f5f7f7] transition hover:bg-white/[0.16]`}
           >
             Add your key
           </button>
         </div>
       </div>
-      {popupOpen ? <DemoPopup onClose={close} /> : null}
+      {popupMessage !== null ? <DemoPopup message={popupMessage} onClose={close} /> : null}
     </>
   );
 }
