@@ -12,6 +12,9 @@ export interface Project {
   framework: string;
   /** Display string ("2h ago"); derived from the root mtime. */
   lastEdited: string;
+  /** Root mtime epoch ms — drives the hover tooltip's freshness copy.
+   *  Absent only for pre-timestamp custom entries (treated as now). */
+  editedAt?: number;
 }
 
 export interface ActiveProject {
@@ -46,7 +49,7 @@ function unwrap<T>(action: string, res: Response, body: { ok: boolean; value?: T
 
 export function relativeEdited(mtimeMs: number): string {
   if (!mtimeMs) return "unknown";
-  const mins = Math.max(0, Math.round((Date.now() - mtimeMs) / 60000));
+  const { mins } = elapsedSince(mtimeMs);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.round(mins / 60);
@@ -54,6 +57,36 @@ export function relativeEdited(mtimeMs: number): string {
   const days = Math.round(hours / 24);
   if (days < 30) return `${days}d ago`;
   return new Date(mtimeMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Shared elapsed breakdown — single Date.now() math for both freshness
+ *  readers so the tile sub-line and tooltip can't drift apart. */
+function elapsedSince(at: number): { secs: number; mins: number; hours: number; days: number } {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
+  const mins = Math.floor(secs / 60);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  return { secs, mins, hours, days };
+}
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+}
+
+/** Hover-tooltip freshness: full unit ladder (seconds → years), always a
+ *  short single line that fits the 273px HiFi card. Mirrors the HiFi tooltip
+ *  ("Last updated: 15 seconds ago"). */
+export function tooltipFresh(project: Project): string {
+  const at = project.editedAt ?? Date.now();
+  const { secs, mins, hours, days } = elapsedSince(at);
+  if (secs < 5) return "Last updated: just now";
+  if (secs < 60) return `Last updated: ${plural(secs, "second")} ago`;
+  if (mins < 60) return `Last updated: ${plural(mins, "minute")} ago`;
+  if (hours < 24) return `Last updated: ${plural(hours, "hour")} ago`;
+  if (days < 7) return `Last updated: ${plural(days, "day")} ago`;
+  if (days < 30) return `Last updated: ${plural(Math.floor(days / 7), "week")} ago`;
+  if (days < 365) return `Last updated: ${plural(Math.floor(days / 30), "month")} ago`;
+  return `Last updated: ${plural(Math.floor(days / 365), "year")} ago`;
 }
 
 /** Live scan — throws on transport error or {ok:false} envelope. */
@@ -68,6 +101,7 @@ export async function fetchProjects(): Promise<Project[]> {
     path: e.path,
     framework: e.framework,
     lastEdited: relativeEdited(e.mtimeMs),
+    editedAt: e.mtimeMs,
   }));
 }
 
@@ -171,6 +205,7 @@ export function saveCustomProject(p: { name: string; path: string }): Project {
     path: p.path,
     framework: "React",
     lastEdited: "just now",
+    editedAt: Date.now(),
   };
   if (canStore()) {
     try {

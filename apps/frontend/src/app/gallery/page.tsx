@@ -1,12 +1,9 @@
-/* Ground truth: Figma "gaze / Project gallery" (1280×832), Flow 3.
-   Frame bg #0A0A0A · blueprint grid · 220px header fade · shared header.
-   Intro: "Welcome to gaze." Jost 40px at x112 y163; description 18px y223.
-   Gallery backplate x110 y281 1060×424; actions bar y740 (count 15px +
-   "+ Create new" 18px → /new). Tile sub-line (path · edited) is the voted
-   delta over the frame's name-only tile. Interactive board is a client
-   island; the frame shell stays a server component. */
+/* Ground truth: Figma "gaze / Project gallery" (1280×832), Flow 3 HIFI.
+   Heading "Welcome to gaz[e-mark]" 40px at x112 y125 (logo mark inline),
+   description 18px y185. Search x56 y246. Grid x56 y328: 2×4 cards
+   273×191. Footer y770: count + pagination pill. First card creates. */
 import ScaleStage from "../stage";
-import SiteHeader from "../components/site-header";
+import SiteHeader, { LogoMark } from "../components/site-header";
 import GalleryBoard from "./board";
 
 export default function GalleryPage() {
@@ -22,10 +19,11 @@ export default function GalleryPage() {
         />
         <SiteHeader />
 
-        {/* intro: x112 y163 */}
-        <div className="absolute left-[112px] top-[163px] w-[1056px]">
+        {/* intro: x112 y125, logo mark inline after "gaz" */}
+        <div className="absolute left-[112px] top-[125px] w-[1056px]">
           <h1 className="text-[40px] font-normal leading-[52px] tracking-[-1.2px] text-[#f5f7f7]">
-            Welcome to gaze.
+            Welcome to gaz
+            <LogoMark />
           </h1>
           <p className="mt-[8px] text-[18px] font-normal leading-[26px] text-[#c5cad3]">
             Pick up where you left off, or bring a new idea to life.

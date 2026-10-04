@@ -13,7 +13,7 @@ test('localhost previews preserve paths, ports, and URL query parameters', () =>
 
 test('project routes encode names and preview URLs and reject reserved names', () => {
   assert.equal(projectHref(' My Website ', 'http://localhost:3001'), '/My%20Website?preview=http%3A%2F%2Flocalhost%3A3001%2F');
-  for (const name of ['', 'projects', 'API', '..', 'one/two', 'a'.repeat(81)]) {
+  for (const name of ['', 'projects', 'new', 'gallery', 'API', '..', 'one/two', 'a/b/c', 'a\\b', 'a'.repeat(81)]) {
     assert.equal(validProjectName(name), false);
     assert.throws(() => projectHref(name, 'http://localhost:3001'));
   }

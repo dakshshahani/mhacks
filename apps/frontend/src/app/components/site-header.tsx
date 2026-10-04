@@ -3,6 +3,7 @@
 // header inlined in app/page.tsx — kept as a component so new routes share
 // it without duplicating markup again.
 import Link from "next/link";
+import { GLASS } from "./glass";
 
 const NAV = [
   { label: "Projects", href: "/gallery" },
@@ -66,7 +67,7 @@ export default function SiteHeader() {
         <Link
           href="/account"
           aria-label="Account"
-          className="flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px] transition-opacity hover:opacity-85"
+          className={`flex h-[61px] w-[61px] items-center justify-center rounded-full bg-[#1d1d1d]/80 ${GLASS} transition-opacity hover:opacity-85`}
         >
           <UserIcon />
         </Link>

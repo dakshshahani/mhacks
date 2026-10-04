@@ -36,18 +36,8 @@ export default function ImportPage() {
           </p>
         </div>
 
-        {/* cards: two 336×288 on a 696 backplate, y365 */}
+        {/* cards: two 336×288, y365 (Hifi carries no backplate here) */}
         <section aria-label="Upload sources" className="absolute left-[292px] top-[365px] h-[288px] w-[696px]">
-          <div className="absolute inset-0 rounded-[28px] bg-gradient-to-b from-[#666666]/40 via-[#1d1d1d]/90 to-[#1d1d1d] shadow-[inset_0_1px_1px_rgba(255,255,255,0.5),inset_0_0_22px_rgba(255,255,255,0.12)] backdrop-blur-[40px]">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 rounded-[28px]"
-              style={{
-                background:
-                  "radial-gradient(60% 90% at 30% 20%, rgba(76,187,193,0.14), transparent 70%), radial-gradient(50% 80% at 75% 80%, rgba(74,88,191,0.16), transparent 70%)",
-              }}
-            />
-          </div>
           <ImportBoard />
         </section>
 
